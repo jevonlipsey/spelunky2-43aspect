@@ -94,6 +94,13 @@ a:hover { color: var(--accent-hover); }
 
 .step { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: .95rem; flex: none; }
 
+/* Paths & Hint */
+.paths { list-style: none; padding: 0; margin: 0 0 1rem; display: grid; gap: .6rem; }
+.paths li { background: var(--surface-2); border-radius: 10px; padding: .6rem .75rem; }
+.os { display: block; font-size: .8rem; font-weight: 600; color: var(--muted); margin-bottom: .2rem; }
+.path { display: block; background: none; padding: 0; font-size: .85rem; }
+.hint { margin: .75rem 0 0; color: var(--muted); font-size: .85rem; }
+
 .drop {
   position: relative;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .25rem;
@@ -167,12 +174,18 @@ details[open] summary { margin-bottom: .5rem; }
       <h2><span class="step">1</span> Choose your game file</h2>
       <p>Select <code>Spel2.exe</code> from your Spelunky 2 game directory:</p>
 
+      <ul class="paths">
+        <li><span class="os">DroidDeck</span><code class="path">/root/.local/share/Steam/steamapps/common/Spelunky 2/Spel2.exe</code></li>
+        <li><span class="os">Windows, Linux, Steam Deck, GameNative</span><code class="path">Spelunky 2/Spel2.exe</code></li>
+      </ul>
+
       <label id="drop" class="drop" for="file">
         <input id="file" class="file-input" type="file" accept=".exe,application/octet-stream,application/x-msdownload">
         <svg class="drop-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 7 8h3.5v6h3V8H17l-5-5ZM5 17v3h14v-3h-2v1H7v-1H5Z"/></svg>
         <span class="drop-main">Tap to choose <span class="nowrap">Spel2.exe</span></span>
         <span class="drop-sub">or drag and drop it here</span>
       </label>
+      <p class="hint">Can't select the file on Android? In the file picker's menu, switch to “All files” or “Browse”.</p>
     </section>
 
     <section class="card" id="result">
