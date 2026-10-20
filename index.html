@@ -24,7 +24,7 @@ progress{width:100%;height:10px;margin-top:10px;accent-color:var(--accent)}
 #status{font-weight:600;min-height:1.5em}
 #status.ok{color:var(--ok)}#status.bad{color:var(--bad)}#status.warn{color:var(--warn)}
 code{font:.88em ui-monospace,Menlo,Consolas,monospace;background:var(--drop);padding:1px 5px;border-radius:4px}
-ul{padding-left:20px;margin:0 0 12px}
+ul,ol{padding-left:20px;margin:0 0 12px}
 a{color:var(--accent)}
 [hidden]{display:none!important}
 </style>
@@ -32,7 +32,11 @@ a{color:var(--accent)}
 <body>
 <main>
 <h1>Spelunky 2 4:3 Patcher</h1>
-<p class="muted">Patches <code>Spel2.exe</code> to render natively at 4:3 instead of letterboxed 16:9, and fixes the startup hang on Android / ARM64 (Proton, FEX, Winlator and similar). One file, nothing else to install.</p>
+<p class="muted">Patches <code>Spel2.exe</code> in two steps, in one file with nothing else to install:</p>
+<ol class="muted">
+  <li><strong>Android fix:</strong> the game no longer hangs at startup on Android / ARM64 (Proton, FEX, Winlator and similar).</li>
+  <li><strong>Native 4:3:</strong> the game renders at 4:3 instead of letterboxed 16:9, with the HUD and menus un-stretched and Android's missing audio restored.</li>
+</ol>
 
 <div id="drop">
   <p><strong>Drop <code>Spel2.exe</code> here</strong><br><span class="muted">or choose it from your device</span></p>
@@ -61,13 +65,13 @@ a{color:var(--accent)}
 
 <details class="muted">
   <summary>What does the patch do?</summary>
-  <p><strong>4:3 mod.</strong> The page adds the mod to <code>Spel2.exe</code> as a new section and runs it from the exe's entry point before the game starts. It is the same code as <code>discord_game_sdk.dll</code> from the <a href="https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest">release</a> (sha256 <code id="modsha"></code>), built from the <a href="https://github.com/jevonlipsey/spelunky2-43aspect">source</a>. It patches the projection, viewport and 2D UI for 4:3 in memory and restores the audio that Android leaves muted. Settings live in <code>mod_43aspect.ini</code>.</p>
-  <p><strong>Android fix.</strong> The game reserves 5 blocks of 32 MiB at random address hints between <code>0x701</code> and <code>0x7FF</code> shifted left 32 bits, which is above 7 TiB, and retries forever when that fails. Android / ARM64 kernels with a 39-bit address space (512 GiB) can never satisfy that, so the game hangs. The patch changes two single bytes so hints stay at <code>0x01</code> to <code>0x7F</code> shifted left 32 bits (below 512 GiB):</p>
+  <p><strong>1. Android fix.</strong> The game reserves 5 blocks of 32 MiB at random address hints between <code>0x701</code> and <code>0x7FF</code> shifted left 32 bits, which is above 7 TiB, and retries forever when that fails. Android / ARM64 kernels with a 39-bit address space (512 GiB) can never satisfy that, so the game hangs. The patch changes two single bytes so hints stay at <code>0x01</code> to <code>0x7F</code> shifted left 32 bits (below 512 GiB):</p>
   <ul>
     <li><code>MOV RBX, 0x7017F800000</code> becomes <code>MOV RBX, 0x17F800000</code></li>
     <li><code>AND ECX, 0xFE</code> becomes <code>AND ECX, 0x7E</code></li>
   </ul>
   <p>The page only patches when both spots are found exactly once, both stock or both already patched (by this page's older version or GabrielGabriel197's patcher). Otherwise it changes nothing.</p>
+  <p><strong>2. Native 4:3.</strong> The page adds the mod to <code>Spel2.exe</code> as a new section and runs it from the exe's entry point before the game starts. It is the same code as <code>discord_game_sdk.dll</code> from the <a href="https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest">release</a> (sha256 <code id="modsha"></code>), built from the <a href="https://github.com/jevonlipsey/spelunky2-43aspect">source</a>. It patches the projection, viewport and 2D UI for 4:3 in memory and restores the audio that Android leaves muted. Settings live in <code>mod_43aspect.ini</code>.</p>
 </details>
 
 <p class="muted">On Windows PC? You can skip this page: drop <code>discord_game_sdk.dll</code> from the <a href="https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest">latest release</a> into the game folder instead. Source: <a href="https://github.com/jevonlipsey/spelunky2-43aspect">jevonlipsey/spelunky2-43aspect</a>.</p>
