@@ -10,7 +10,8 @@
  *   - audio: restores the sfx / music bus volumes the game leaves muted
  *
  * freestanding x86_64 dll with -nostdlib -Wl,-e,DllMain: no CRT, imports only
- * KERNEL32.dll.
+ * KERNEL32.dll. the web patcher can also embed it in Spel2.exe itself (see
+ * embedded_entry).
  */
 
 #include <windows.h>
@@ -18,7 +19,7 @@
 
 #define fabsf(x) __builtin_fabsf(x)
 
-#define MOD_VERSION    "mod_43aspect 4.1"
+#define MOD_VERSION    "mod_43aspect 4.2"
 #define DEFAULT_ASPECT  1.3333334f
 #define ORIGINAL_ASPECT 1.7777778f
 #define ORIGINAL_INV    0.5625f
@@ -32,6 +33,7 @@ static int       g_failures = 0;
 static uintptr_t g_base     = 0;
 static float     g_aspect   = DEFAULT_ASPECT;
 static int       g_debug    = 0;
+static int       g_embedded = 0; /* 1 = loaded by embedded_entry, not as a dll */
 
 static char g_ini_path[MAX_PATH];
 
@@ -2471,7 +2473,8 @@ static void apply_patches(void) {
     truncate_file(g_log_path);
     truncate_file(g_boot_path);
 
-    boot_raw("[BOOT] " MOD_VERSION " (freestanding build)");
+    boot_raw(g_embedded ? "[BOOT] " MOD_VERSION " (embedded in Spel2.exe)"
+                        : "[BOOT] " MOD_VERSION " (freestanding build)");
     boot_raw(toggle);
 
     log_raw("[*] " MOD_VERSION " (freestanding build)");
@@ -2666,12 +2669,89 @@ __declspec(dllexport) int DiscordCreate(int version, void* params, void** result
     return 1;
 }
 
+/* ### embedded mode
+ *
+ * the web patcher carries this same dll inside Spel2.exe instead of next to
+ * it: it lays the image out in a new exe section named EMBED_SECTION and
+ * points the exe's entry at a stub that calls embedded_entry(exe, image),
+ * then jumps on to the real entry. no loader has touched the image, so this
+ * relocates it and binds its kernel32 imports itself. until that is done it
+ * must not call an import or read a global that holds an address: the two
+ * functions it needs come from the exe's own, already bound, import table. */
+
+#define EMBED_SECTION ".m43"
+
+/* 1 when the exe carries the embedded mod. a dll copy loaded next to such an
+ * exe stands down, so the two never patch the same bytes. */
+static int exe_has_embed(void) {
+    uint8_t* exe = (uint8_t*)GetModuleHandleA(NULL);
+    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)(exe + ((PIMAGE_DOS_HEADER)exe)->e_lfanew);
+    PIMAGE_SECTION_HEADER s = IMAGE_FIRST_SECTION(nt);
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; i++, s++)
+        if (my_memcmp(s->Name, EMBED_SECTION, sizeof(EMBED_SECTION)) == 0) return 1;
+    return 0;
+}
+
+BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved);
+
+__declspec(dllexport) void embedded_entry(uint8_t* exe, uint8_t* img) {
+    FARPROC (WINAPI *gpa)(HMODULE, LPCSTR) = NULL;
+    HMODULE (WINAPI *gmh)(LPCSTR) = NULL;
+    patch_one_import((HMODULE)exe, "GetProcAddress", 1, NULL, (void**)&gpa);
+    patch_one_import((HMODULE)exe, "GetModuleHandleA", 1, NULL, (void**)&gmh);
+    if (!gpa || !gmh) return;
+
+    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)(img + ((PIMAGE_DOS_HEADER)img)->e_lfanew);
+    PIMAGE_DATA_DIRECTORY dir = nt->OptionalHeader.DataDirectory;
+
+    uint64_t delta = (uint64_t)(uintptr_t)img - nt->OptionalHeader.ImageBase;
+    uint8_t* r = img + dir[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress;
+    uint8_t* r_end = r + dir[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
+    while (r < r_end) {
+        PIMAGE_BASE_RELOCATION b = (PIMAGE_BASE_RELOCATION)r;
+        if (b->SizeOfBlock < sizeof(*b)) break;
+        for (WORD* e = (WORD*)(b + 1); (uint8_t*)e < r + b->SizeOfBlock; e++)
+            if ((*e >> 12) == IMAGE_REL_BASED_DIR64)
+                *(uint64_t*)(img + b->VirtualAddress + (*e & 0xfff)) += delta;
+        r += b->SizeOfBlock;
+    }
+
+    PIMAGE_IMPORT_DESCRIPTOR imp =
+        (PIMAGE_IMPORT_DESCRIPTOR)(img + dir[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+    for (; imp->Name; imp++) {
+        HMODULE mod = gmh((const char*)(img + imp->Name));
+        if (!mod) return;
+        PIMAGE_THUNK_DATA orig = (PIMAGE_THUNK_DATA)(img + imp->OriginalFirstThunk);
+        PIMAGE_THUNK_DATA iat  = (PIMAGE_THUNK_DATA)(img + imp->FirstThunk);
+        for (; orig->u1.AddressOfData; orig++, iat++) {
+            PIMAGE_IMPORT_BY_NAME ibn = (PIMAGE_IMPORT_BY_NAME)(img + orig->u1.AddressOfData);
+            FARPROC fn = gpa(mod, (const char*)ibn->Name);
+            if (!fn) return;
+            iat->u1.Function = (ULONG_PTR)fn;
+        }
+    }
+
+    /* the loader would register these; without them nothing can unwind
+     * through the mod's frames */
+    PIMAGE_DATA_DIRECTORY pd = &dir[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+    if (pd->Size)
+        RtlAddFunctionTable((PRUNTIME_FUNCTION)(img + pd->VirtualAddress),
+                            pd->Size / sizeof(RUNTIME_FUNCTION), (DWORD64)(uintptr_t)img);
+
+    g_embedded = 1;
+    DllMain((HINSTANCE)img, DLL_PROCESS_ATTACH, NULL);
+}
+
 BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID reserved) {
     (void)hinst;
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {
-        crumb("[crumb] dllmain entered");
-        DisableThreadLibraryCalls(hinst);
+        if (!g_embedded && exe_has_embed()) {
+            crumb("[crumb] exe carries the embedded mod, dll stands down");
+            return TRUE;
+        }
+        crumb(g_embedded ? "[crumb] embedded entry" : "[crumb] dllmain entered");
+        if (!g_embedded) DisableThreadLibraryCalls(hinst);
         crumb("[crumb] calling apply_patches");
         apply_patches();
         crumb("[crumb] apply_patches returned");

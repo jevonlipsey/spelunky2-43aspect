@@ -10,12 +10,17 @@ DLL  = discord_game_sdk.dll
 GAME = /root/.local/share/Steam/steamapps/common/Spelunky 2
 SSH  = ssh -o BatchMode=yes droiddeck
 
-.PHONY: all clean debug release deploy push_ini pull_ini logs test
+.PHONY: all clean debug release page deploy push_ini pull_ini logs test
 
 all: release
 
 release:
 	$(CC) $(CFLAGS_ASPECT) $(CFLAGS_RELEASE) mod_43aspect.c -o $(DLL) $(LDLIBS_ASPECT)
+
+# the web patcher embeds the release dll in Spel2.exe; index.html carries a
+# copy, and `make test` fails when it differs from discord_game_sdk.dll
+page: release
+	node tools/embed_dll.mjs
 
 debug:
 	$(CC) $(CFLAGS_ASPECT) mod_43aspect.c -o $(DLL) $(LDLIBS_ASPECT)

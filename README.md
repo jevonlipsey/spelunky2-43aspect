@@ -1,37 +1,30 @@
 # Spelunky 2 native 4:3 + Android compatibility
 
-**[Download the dll](https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest)** · **[Browser exe patcher](https://jevonlipsey.github.io/spelunky2-43aspect/)**
+**[Browser patcher (Android)](https://jevonlipsey.github.io/spelunky2-43aspect/)** · **[Download the dll (PC)](https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest)**
 
-A mod for Spelunky 2 that renders the game natively at 4:3 instead of letterboxed 16:9, and fixes the startup hang on Android (Proton via FEX). It also un-stretches the 2D UI for 4:3 and restores the sound that is otherwise missing on Android. It ships as a single `discord_game_sdk.dll` that the game loads in place of its Discord SDK.
+A mod for Spelunky 2 that renders the game natively at 4:3 instead of letterboxed 16:9, and fixes the startup hang on Android (Proton via FEX). It also un-stretches the 2D UI for 4:3 and restores the sound that is otherwise missing on Android.
+
+The same mod ships two ways: patched into `Spel2.exe` by a web page, or as a drop-in `discord_game_sdk.dll`. Use one, not both.
 
 ## Install
 
-### Option A: Full 4:3 + Android Compat
+### Android: browser patcher
 
-1. Back up the game's original `discord_game_sdk.dll`.
-2. Download `discord_game_sdk.dll` from the [latest release](https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest) (or build it, see below) and copy it into the game folder, next to `Spel2.exe` (for example `steamapps/common/Spelunky 2/`), replacing the original.
+1. Open https://jevonlipsey.github.io/spelunky2-43aspect/ (or `index.html` locally).
+2. Drop your `Spel2.exe` on the page and save the patched file over the original. Keep a backup.
 3. Launch the game. `mod_43aspect.ini` is created next to `Spel2.exe` with defaults on first launch.
 
-Notes:
+The page adds the Android heap fix and embeds the 4:3 mod in the exe as a new section that runs before the game starts. Nothing else to install, and Discord rich presence keeps working. The file is processed locally and never uploaded. Steam's "verify integrity of game files" reverts the patch. An exe already patched by GabrielGabriel197's Android patcher is accepted.
 
-- No exe patching is needed. The dll applies the Android heap patch itself when the game starts.
-- Discord integration (rich presence) is disabled, because this dll replaces the real Discord SDK.
-- To uninstall, restore the original `discord_game_sdk.dll`.
+> *Only want the Android fix with stock 16:9? Use GabrielGabriel197's patcher: https://github.com/GabrielGabriel197/Spelunky2-Android-Patch*
 
-> *Note: This 4:3 mod includes the Android heap compatibility patch built-in. If you only want the standalone Android fix while retaining stock 16:9, please use GabrielGabriel197's patcher: https://github.com/GabrielGabriel197/Spelunky2-Android-Patch* .
+### Windows PC: drop-in dll
 
-### Option B: Browser EXE Patcher
+1. Back up the game's original `discord_game_sdk.dll`.
+2. Download `discord_game_sdk.dll` from the [latest release](https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest) and copy it into the game folder, next to `Spel2.exe` (for example `steamapps/common/Spelunky 2/`), replacing the original.
+3. Launch the game. `mod_43aspect.ini` is created next to `Spel2.exe` with defaults on first launch.
 
-Applies only the Android compatibility (heap) patch, with the stock 16:9 picture.
-
-1. Open the patcher: https://jevonlipsey.github.io/spelunky2-43aspect/ (or open `index.html` locally).
-2. Drag and drop your `Spel2.exe` onto the page and save the patched file over the original.
-
-Notes:
-
-- Processing is local; the file is not uploaded anywhere.
-- Keep a backup of the original `Spel2.exe`.
-- Steam's "verify integrity of game files" reverts the patch.
+No exe patching is needed (the dll applies the heap fix in memory too, so it also works on Android). Discord rich presence is disabled, because this dll replaces the real Discord SDK. To uninstall, restore the original dll. If the exe was also patched by the page, the dll stays idle.
 
 ## Configuration
 
@@ -59,6 +52,7 @@ Needs `x86_64-w64-mingw32-gcc`.
 
 ```sh
 make release   # builds discord_game_sdk.dll from mod_43aspect.c
+make page      # release, then embeds that dll in index.html for the web patcher
 make test      # host checks; the patcher test needs a stock Spel2.exe in the repo root
 ```
 

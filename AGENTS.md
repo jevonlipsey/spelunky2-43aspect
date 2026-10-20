@@ -49,5 +49,9 @@ only when you need the dump — it causes the first-pause hitch).
 
 hud, pause menu, camp and world are all 4:3 and user-verified on device (pin11).
 the single-dll release (heap fix + 4:3 + audio, debug logging off) is **not yet
-verified on device**. native windows pc has never been run. `make test` runs the
+verified on device**. the web patcher (`index.html`) now embeds that same dll in
+Spel2.exe as section `.m43` with an entry stub (`embedded_entry`); host-tested
+under wine, **not yet run on device**. the boot log's first line says
+`(embedded in Spel2.exe)` or `(freestanding build)`. after any mod change run
+`make page` so the page carries the new dll. native windows pc has never been run. `make test` runs the
 host checks; it needs a stock `Spel2.exe` copied into the repo root (gitignored).
