@@ -1,0 +1,11 @@
+# build output: ship the dll as a release asset, not in the tree
+*.dll
+tools/alg.inc
+tools/test_alg
+
+# device logs and the game binary (copyrighted, 558 MB) never go in
+*.log
+Spel2.exe
+
+.DS_Store
+__pycache__/

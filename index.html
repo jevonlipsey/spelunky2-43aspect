@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spelunky 2 Android Patcher</title>
+<style>
+:root{--bg:#f6f5f2;--fg:#1c1b19;--muted:#68645c;--card:#fff;--line:#d9d5cb;--accent:#b4540a;--accent-fg:#fff;--ok:#1d6b2f;--bad:#a4281c;--warn:#8a5a00;--drop:#fbf1e6}
+@media (prefers-color-scheme:dark){:root{--bg:#161513;--fg:#ecE9e2;--muted:#a09a8e;--card:#201e1b;--line:#3a3731;--accent:#e8873a;--accent-fg:#1a1208;--ok:#6fcf86;--bad:#ff8a7c;--warn:#e6b455;--drop:#2a2118}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:640px;margin:0 auto;padding:24px 16px 48px;overflow-wrap:anywhere}
+h1{font-size:1.6rem;line-height:1.2;margin:0 0 8px}
+p{margin:0 0 12px}
+.muted{color:var(--muted);font-size:.92rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:16px 0}
+#drop{border:2px dashed var(--line);border-radius:12px;padding:28px 16px;text-align:center;background:var(--card);transition:background .15s,border-color .15s}
+#drop.over{background:var(--drop);border-color:var(--accent)}
+button,.btn{font:inherit;font-weight:600;border:0;border-radius:8px;padding:12px 20px;background:var(--accent);color:var(--accent-fg);cursor:pointer;min-height:44px}
+button:disabled{opacity:.5;cursor:default}
+#file{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+#file:focus-visible+label.btn{outline:3px solid var(--fg);outline-offset:2px}
+progress{width:100%;height:10px;margin-top:10px;accent-color:var(--accent)}
+#status{font-weight:600;min-height:1.5em}
+#status.ok{color:var(--ok)}#status.bad{color:var(--bad)}#status.warn{color:var(--warn)}
+code{font:.88em ui-monospace,Menlo,Consolas,monospace;background:var(--drop);padding:1px 5px;border-radius:4px}
+ul{padding-left:20px;margin:0 0 12px}
+a{color:var(--accent)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>Spelunky 2 Android Patcher</h1>
+<p class="muted">Patches <code>Spel2.exe</code> so the game no longer hangs at startup on Android / ARM64 (Proton, FEX, Winlator and similar).</p>
+
+<div id="drop">
+  <p><strong>Drop <code>Spel2.exe</code> here</strong><br><span class="muted">or choose it from your device</span></p>
+  <input id="file" type="file" accept=".exe,application/octet-stream,application/x-msdownload">
+  <label class="btn" for="file">Choose Spel2.exe</label>
+</div>
+
+<div class="card" id="result">
+  <div id="status" role="status" aria-live="polite">Waiting for a file.</div>
+  <progress id="prog" value="0" max="1" hidden></progress>
+  <div id="detail" class="muted"></div>
+  <p style="margin-top:12px" id="dlwrap" hidden><button id="dl" type="button">Download patched Spel2.exe</button></p>
+</div>
+
+<div class="card" id="notes" hidden>
+  <strong>Before you use it</strong>
+  <ul>
+    <li>Keep a backup of your original <code>Spel2.exe</code>.</li>
+    <li>Put the patched file in the game folder, replacing the original.</li>
+    <li>Steam "Verify integrity of game files" will undo the patch.</li>
+  </ul>
+</div>
+
+<p class="muted"><strong>Privacy:</strong> the file never leaves your device. Everything runs in this page, with no uploads and no external requests.</p>
+
+<details class="muted">
+  <summary>What does the patch do?</summary>
+  <p>The game reserves 5 blocks of 32 MiB at random address hints between <code>0x701</code> and <code>0x7FF</code> shifted left 32 bits, which is above 7 TiB, and retries forever when that fails. Android / ARM64 kernels with a 39-bit address space (512 GiB) can never satisfy that, so the game hangs. The patch changes two single bytes so hints stay at <code>0x01</code> to <code>0x7F</code> shifted left 32 bits (below 512 GiB):</p>
+  <ul>
+    <li><code>MOV RBX, 0x7017F800000</code> becomes <code>MOV RBX, 0x17F800000</code></li>
+    <li><code>AND ECX, 0xFE</code> becomes <code>AND ECX, 0x7E</code></li>
+  </ul>
+  <p>The page only patches when both spots are found exactly once in their stock form. Otherwise it changes nothing.</p>
+</details>
+
+<p class="muted">Based on the original Android patch by <a href="https://github.com/GabrielGabriel197/Spelunky2-Android-Patch" rel="noopener noreferrer">GabrielGabriel197/Spelunky2-Android-Patch</a>. The 4:3 mod's <code>discord_game_sdk.dll</code> already includes this patch, so you do not need this page if you use that mod.</p>
+</main>
+
+<script id="core">
+const Spel2Patch = (function () {
+  'use strict';
+  const hex = (s) => Uint8Array.from(s.trim().split(/\s+/).map((h) => parseInt(h, 16)));
+  // Two patch sites. 'at' = index of the patched byte inside the signature,
+  // 'hint' = file offset where the signature starts in the known stock build.
+  const SITES = [
+    { name: 'heap base (MOV RBX)', at: 7, from: 0x07, to: 0x00, hint: 0x22CBCA24, anchor: 3,
+      stock: hex('48 BB 00 00 80 7F 01 07 00 00 48 8B 35'),
+      patched: hex('48 BB 00 00 80 7F 01 00 00 00 48 8B 35') },
+    { name: 'hint mask (AND ECX)', at: 4, from: 0xFE, to: 0x7E, hint: 0x22CBCAB8, anchor: 4,
+      stock: hex('31 C1 81 E1 FE 00 00 00 48 C1 E1 20 48 09 D9'),
+      patched: hex('31 C1 81 E1 7E 00 00 00 48 C1 E1 20 48 09 D9') },
+  ];
+  const CHUNK = 16 * 1024 * 1024;
+  const OVERLAP = Math.max(...SITES.map((s) => s.stock.length)) - 1;
+
+  const eq = (buf, pos, sig) => {
+    if (pos < 0 || pos + sig.length > buf.length) return false;
+    for (let i = 0; i < sig.length; i++) if (buf[pos + i] !== sig[i]) return false;
+    return true;
+  };
+  const h = (n) => '0x' + n.toString(16).toUpperCase();
+  const err = (message) => ({ state: 'error', sites: [], message });
+  const siteOf = (s, abs) => ({ offset: abs + s.at, from: s.from, to: s.to, name: s.name });
+
+  async function fastPath(read, size) {
+    const found = [];
+    for (const s of SITES) {
+      if (s.hint + s.stock.length > size) return null;
+      const w = await read(s.hint, s.stock.length);
+      if (eq(w, 0, s.stock)) found.push({ s, kind: 'stock' });
+      else if (eq(w, 0, s.patched)) found.push({ s, kind: 'patched' });
+      else return null;
+    }
+    const kinds = new Set(found.map((f) => f.kind));
+    if (kinds.size !== 1) return null; // mixed: let the full scan explain it
+    const kind = found[0].kind;
+    return { kind, sites: found.map((f) => siteOf(f.s, f.s.hint)) };
+  }
+
+  async function fullScan(read, size, onProgress) {
+    // matches[i] = { stock: Set, patched: Set } of absolute signature start offsets
+    const matches = SITES.map(() => ({ stock: new Set(), patched: new Set() }));
+    let pos = 0;
+    while (pos < size) {
+      const len = Math.min(CHUNK + OVERLAP, size - pos);
+      const buf = await read(pos, len);
+      SITES.forEach((s, i) => {
+        for (const kind of ['stock', 'patched']) {
+          const sig = s[kind];
+          const key = sig[s.anchor];
+          let p = buf.indexOf(key, s.anchor);
+          while (p !== -1) {
+            if (eq(buf, p - s.anchor, sig)) matches[i][kind].add(pos + p - s.anchor);
+            p = buf.indexOf(key, p + 1);
+          }
+        }
+      });
+      pos += CHUNK;
+      if (onProgress) onProgress(Math.min(1, pos / size));
+    }
+    return matches;
+  }
+
+  function decide(matches) {
+    const desc = (i) => `${SITES[i].name}: ${matches[i].stock.size} stock, ${matches[i].patched.size} patched`;
+    const all = SITES.map((_, i) => i);
+    const stockOk = all.every((i) => matches[i].stock.size === 1 && matches[i].patched.size === 0);
+    const patchedOk = all.every((i) => matches[i].patched.size === 1 && matches[i].stock.size === 0);
+    if (stockOk) {
+      return { state: 'stock', sites: all.map((i) => siteOf(SITES[i], [...matches[i].stock][0])),
+        message: 'Stock file recognised. Both patch sites found exactly once.' };
+    }
+    if (patchedOk) {
+      return { state: 'patched', sites: all.map((i) => siteOf(SITES[i], [...matches[i].patched][0])),
+        message: 'Already patched. Nothing to do.' };
+    }
+    return err('Refusing to patch: this does not look like the expected Spel2.exe (' +
+      all.map(desc).join('; ') + '). Each site must match exactly once, and both must be stock or both patched.');
+  }
+
+  // read: async (offset, length) => Uint8Array ; size: total bytes
+  // opts: { skipFast, onProgress }
+  async function analyze(read, size, opts) {
+    opts = opts || {};
+    try {
+      if (size < 0x1000) return err('File is too small to be Spel2.exe.');
+      const mz = await read(0, 2);
+      if (mz[0] !== 0x4D || mz[1] !== 0x5A) return err('Not a Windows executable (missing "MZ" header).');
+      if (!opts.skipFast) {
+        const f = await fastPath(read, size);
+        if (f) {
+          return { state: f.kind, sites: f.sites, via: 'fast',
+            message: f.kind === 'stock' ? 'Stock file recognised at the known offsets.' : 'Already patched. Nothing to do.' };
+        }
+      }
+      const r = decide(await fullScan(read, size, opts.onProgress));
+      r.via = 'scan';
+      return r;
+    } catch (e) {
+      return err('Could not read the file: ' + (e && e.message ? e.message : e));
+    }
+  }
+
+  return { analyze, SITES, CHUNK, OVERLAP, hex: h };
+})();
+</script>
+
+<script id="ui">
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const status = $('status'), prog = $('prog'), detail = $('detail'),
+        dlwrap = $('dlwrap'), notes = $('notes'), drop = $('drop'), input = $('file');
+  let busy = false, currentUrl = null, current = null;
+
+  const readerFor = (file) => (offset, length) => new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(new Uint8Array(fr.result));
+    fr.onerror = () => reject(fr.error || new Error('read failed'));
+    fr.readAsArrayBuffer(file.slice(offset, offset + length));
+  });
+  const set = (text, cls) => { status.textContent = text; status.className = cls || ''; };
+
+  function reset() {
+    current = null; dlwrap.hidden = true; notes.hidden = true; detail.textContent = ''; prog.hidden = true;
+  }
+
+  async function handle(file) {
+    if (!file || busy) return;
+    busy = true; reset();
+    set('Checking ' + file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MiB)...');
+    let r;
+    try {
+      r = await Spel2Patch.analyze(readerFor(file), file.size, {
+        onProgress: (f) => { prog.hidden = false; prog.value = f; set('Scanning whole file: ' + Math.round(f * 100) + '%'); },
+      });
+    } finally { busy = false; prog.hidden = true; }
+    const sites = r.sites.map((s) => s.name + ' at ' + Spel2Patch.hex(s.offset)).join('; ');
+    if (r.state === 'stock') {
+      current = { file, sites: r.sites };
+      set('Ready to patch.', 'ok');
+      detail.textContent = r.message + (sites ? ' (' + sites + ')' : '');
+      dlwrap.hidden = false; notes.hidden = false;
+    } else if (r.state === 'patched') {
+      set('Already patched.', 'ok');
+      detail.textContent = 'This file already has the Android patch. There is nothing to download.';
+    } else {
+      set('Not patched.', 'bad');
+      detail.textContent = r.message;
+    }
+  }
+
+  function download() {
+    if (!current) return;
+    const { file } = current;
+    const sites = current.sites.slice().sort((a, b) => a.offset - b.offset);
+    const parts = []; let pos = 0;
+    for (const s of sites) {
+      parts.push(file.slice(pos, s.offset), new Uint8Array([s.to]));
+      pos = s.offset + 1;
+    }
+    parts.push(file.slice(pos));
+    const blob = new Blob(parts, { type: 'application/octet-stream' });
+    if (currentUrl) URL.revokeObjectURL(currentUrl);
+    currentUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = currentUrl; a.download = 'Spel2.exe';
+    document.body.appendChild(a); a.click(); a.remove();
+    set('Patched file download started.', 'ok');
+    detail.textContent = 'Replace Spel2.exe in the game folder with the downloaded file (keep a backup of the original).';
+    setTimeout(() => { if (currentUrl) { URL.revokeObjectURL(currentUrl); currentUrl = null; } }, 10 * 60 * 1000);
+  }
+
+  input.addEventListener('change', () => { handle(input.files[0]); input.value = ''; });
+  $('dl').addEventListener('click', download);
+  ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (e) => handle(e.dataTransfer.files[0]));
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => e.preventDefault());
+})();
+</script>
+</body>
+</html>
