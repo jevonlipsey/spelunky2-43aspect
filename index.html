@@ -2,81 +2,221 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>Spelunky 2 4:3 Patcher</title>
+<meta name="description" content="Patch your copy of Spelunky 2 for native 4:3 and Android/ARM64 compatibility, entirely in your browser. Your file never leaves your device.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23c9461a'/%3E%3Crect x='7' y='9' width='18' height='14' rx='2' fill='none' stroke='white' stroke-width='2.5'/%3E%3C/svg%3E">
 <style>
-:root{--bg:#f6f5f2;--fg:#1c1b19;--muted:#68645c;--card:#fff;--line:#d9d5cb;--accent:#b4540a;--accent-fg:#fff;--ok:#1d6b2f;--bad:#a4281c;--warn:#8a5a00;--drop:#fbf1e6}
-@media (prefers-color-scheme:dark){:root{--bg:#161513;--fg:#ecE9e2;--muted:#a09a8e;--card:#201e1b;--line:#3a3731;--accent:#e8873a;--accent-fg:#1a1208;--ok:#6fcf86;--bad:#ff8a7c;--warn:#e6b455;--drop:#2a2118}}
-*{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{max-width:640px;margin:0 auto;padding:24px 16px 48px;overflow-wrap:anywhere}
-h1{font-size:1.6rem;line-height:1.2;margin:0 0 8px}
-p{margin:0 0 12px}
-.muted{color:var(--muted);font-size:.92rem}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:16px 0}
-#drop{border:2px dashed var(--line);border-radius:12px;padding:28px 16px;text-align:center;background:var(--card);transition:background .15s,border-color .15s}
-#drop.over{background:var(--drop);border-color:var(--accent)}
-button,.btn{font:inherit;font-weight:600;border:0;border-radius:8px;padding:12px 20px;background:var(--accent);color:var(--accent-fg);cursor:pointer;min-height:44px}
-button:disabled{opacity:.5;cursor:default}
-#file{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
-#file:focus-visible+label.btn{outline:3px solid var(--fg);outline-offset:2px}
-progress{width:100%;height:10px;margin-top:10px;accent-color:var(--accent)}
-#status{font-weight:600;min-height:1.5em}
-#status.ok{color:var(--ok)}#status.bad{color:var(--bad)}#status.warn{color:var(--warn)}
-code{font:.88em ui-monospace,Menlo,Consolas,monospace;background:var(--drop);padding:1px 5px;border-radius:4px}
-ul,ol{padding-left:20px;margin:0 0 12px}
-a{color:var(--accent)}
-[hidden]{display:none!important}
+:root {
+  color-scheme: light dark;
+  --bg: #fbf7f2;
+  --surface: #ffffff;
+  --surface-2: #f4ede4;
+  --text: #2a211b;
+  --muted: #6b5d52;
+  --border: #e3d8cb;
+  --accent: #c9461a;
+  --accent-hover: #ac3a14;
+  --on-accent: #ffffff;
+  --ok: #1e7a45;
+  --ok-bg: #e6f4ec;
+  --bad: #b3261e;
+  --bad-bg: #fcebe9;
+  --warn: #b4540a;
+  --focus: #1a5fd0;
+  --shadow: 0 1px 2px rgba(60, 40, 20, .06), 0 4px 16px rgba(60, 40, 20, .06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17120e;
+    --surface: #211a15;
+    --surface-2: #2b221b;
+    --text: #f3ebe2;
+    --muted: #b3a597;
+    --border: #3b2f26;
+    --accent: #ff8a55;
+    --accent-hover: #ffa076;
+    --on-accent: #1d0e05;
+    --ok: #66d19a;
+    --ok-bg: #16281e;
+    --bad: #ff8d84;
+    --bad-bg: #331a18;
+    --warn: #e6b455;
+    --focus: #8ab4ff;
+    --shadow: none;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+[hidden] { display: none !important; }
+
+.wrap {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+h1 { font-size: 1.75rem; line-height: 1.2; margin: 0 0 .5rem; letter-spacing: -.01em; }
+h2 { font-size: 1.2rem; line-height: 1.3; margin: 0 0 .75rem; display: flex; align-items: center; gap: .5rem; }
+h3 { font-size: 1rem; margin: 1.5rem 0 .5rem; }
+p { margin: 0 0 .75rem; }
+code { font: .9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--surface-2); padding: .1em .35em; border-radius: 4px; overflow-wrap: anywhere; }
+a { color: var(--accent); }
+a:hover { color: var(--accent-hover); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.muted { color: var(--muted); font-size: .9rem; }
+.center { text-align: center; }
+.nowrap { white-space: nowrap; }
+
+.lede { font-size: 1.05rem; }
+.privacy { display: flex; gap: .6rem; align-items: flex-start; color: var(--muted); font-size: .92rem; }
+.ico { width: 1.25rem; height: 1.25rem; flex: none; fill: currentColor; }
+.privacy .ico { color: var(--ok); margin-top: .1rem; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.step { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: .95rem; flex: none; }
+
+.drop {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .25rem;
+  min-height: 11rem;
+  padding: 1.5rem 1rem;
+  border: 2px dashed var(--accent);
+  border-radius: 14px;
+  background: var(--surface-2);
+  text-align: center;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.drop:hover, .drop.over { background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); }
+.drop:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }
+.drop-ico { width: 2.5rem; height: 2.5rem; fill: var(--accent); }
+.drop-main { font-weight: 700; font-size: 1.1rem; }
+.drop-sub { color: var(--muted); font-size: .9rem; }
+.file-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 0; }
+@media (pointer: coarse) { .drop-sub { display: none; } }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  min-height: 2.75rem; padding: .55rem 1.1rem;
+  font: inherit; font-weight: 600; text-decoration: none; text-align: center;
+  color: var(--text); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:hover { background: var(--surface-2); color: var(--text); }
+.btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--on-accent); }
+.btn.big { display: flex; width: 100%; min-height: 3.5rem; font-size: 1.15rem; margin-top: .5rem; }
+.btn.big .ico { width: 1.5rem; height: 1.5rem; }
+
+progress { width: 100%; height: 8px; border-radius: 999px; margin: 10px 0; accent-color: var(--accent); }
+#status { font-weight: 600; min-height: 1.5em; }
+#status.ok { color: var(--ok); }
+#status.bad { color: var(--bad); }
+#status.warn { color: var(--warn); }
+
+.steps { padding-left: 1.4rem; margin: 0 0 1rem; }
+.steps li { margin-bottom: .5rem; }
+
+details { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: .75rem 1.25rem; margin-bottom: 1rem; }
+details summary { cursor: pointer; font-weight: 600; padding: .25rem 0; }
+details[open] summary { margin-bottom: .5rem; }
+
+.foot { color: var(--muted); font-size: .8rem; text-align: center; margin-top: 1.5rem; }
+.foot p { margin: 0 0 .4rem; }
+
+@media (min-width: 34rem) {
+  .wrap { padding-top: 3rem; }
+}
 </style>
 </head>
 <body>
-<main>
-<h1>Spelunky 2 4:3 Patcher</h1>
-<p class="muted">Patches <code>Spel2.exe</code> in two steps, in one file with nothing else to install:</p>
-<ol class="muted">
-  <li><strong>Android fix:</strong> the game no longer hangs at startup on Android / ARM64 (Proton, FEX, Winlator and similar).</li>
-  <li><strong>Native 4:3:</strong> the game renders at 4:3 instead of letterboxed 16:9, with the HUD and menus un-stretched and Android's missing audio restored.</li>
-</ol>
+<div class="wrap">
+  <header class="head">
+    <h1>Spelunky 2 4:3 Patcher</h1>
+    <p class="lede">Patches <code>Spel2.exe</code> for native 4:3 aspect ratio and Android/ARM64 startup compatibility, in one self-contained file.</p>
+    <p class="privacy">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Zm-1.2 14.2-3.5-3.5 1.4-1.4 2.1 2.1 4.7-4.7 1.4 1.4-6.1 6.1Z"/></svg>
+      <span>Everything runs locally in your browser. Your <code>Spel2.exe</code> is never uploaded and never leaves this device.</span>
+    </p>
+  </header>
 
-<div id="drop">
-  <p><strong>Drop <code>Spel2.exe</code> here</strong><br><span class="muted">or choose it from your device</span></p>
-  <input id="file" type="file" accept=".exe,application/octet-stream,application/x-msdownload">
-  <label class="btn" for="file">Choose Spel2.exe</label>
+  <main id="main">
+    <section class="card">
+      <h2><span class="step">1</span> Choose your game file</h2>
+      <p>Select <code>Spel2.exe</code> from your Spelunky 2 game directory:</p>
+
+      <label id="drop" class="drop" for="file">
+        <input id="file" class="file-input" type="file" accept=".exe,application/octet-stream,application/x-msdownload">
+        <svg class="drop-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 7 8h3.5v6h3V8H17l-5-5ZM5 17v3h14v-3h-2v1H7v-1H5Z"/></svg>
+        <span class="drop-main">Tap to choose <span class="nowrap">Spel2.exe</span></span>
+        <span class="drop-sub">or drag and drop it here</span>
+      </label>
+    </section>
+
+    <section class="card" id="result">
+      <h2><span class="step">2</span> Status</h2>
+      <div id="status" role="status" aria-live="polite">Waiting for a file.</div>
+      <progress id="prog" value="0" max="1" hidden></progress>
+      <div id="detail" class="muted" style="margin-top: .5rem;"></div>
+      <p style="margin-top:1rem" id="dlwrap" hidden>
+        <button id="dl" class="btn primary big" type="button">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3h2v9.2l3.6-3.6L18 10l-6 6-6-6 1.4-1.4L11 12.2V3ZM5 18h14v3H5v-3Z"/></svg>
+          <span>Download patched <span class="nowrap">Spel2.exe</span></span>
+        </button>
+      </p>
+    </section>
+
+    <section class="card" id="notes" hidden>
+      <h2>Before you use it</h2>
+      <ol class="steps">
+        <li>Keep a backup of your original <code>Spel2.exe</code>.</li>
+        <li>Put the patched file in the game folder, replacing the original. <code>mod_43aspect.ini</code> appears next to it on first launch.</li>
+        <li>Do not also install the mod's <code>discord_game_sdk.dll</code>. If both are there, the dll stays idle.</li>
+        <li>Steam “Verify integrity of game files” will undo the patch.</li>
+      </ol>
+    </section>
+
+    <details class="muted">
+      <summary>What does the patch do?</summary>
+      <p><strong>1. Android fix.</strong> The game reserves 5 blocks of 32 MiB at random address hints between <code>0x701</code> and <code>0x7FF</code> shifted left 32 bits, which is above 7 TiB, and retries forever when that fails. Android / ARM64 kernels with a 39-bit address space (512 GiB) can never satisfy that, so the game hangs. The patch changes two single bytes so hints stay at <code>0x01</code> to <code>0x7F</code> shifted left 32 bits (below 512 GiB):</p>
+      <ul>
+        <li><code>MOV RBX, 0x7017F800000</code> becomes <code>MOV RBX, 0x17F800000</code></li>
+        <li><code>AND ECX, 0xFE</code> becomes <code>AND ECX, 0x7E</code></li>
+      </ul>
+      <p>The page only patches when both spots are found exactly once, both stock or both already patched (by this page's older version or GabrielGabriel197's patcher). Otherwise it changes nothing.</p>
+      <p><strong>2. Native 4:3.</strong> The page adds the mod to <code>Spel2.exe</code> as a new section and runs it from the exe's entry point before the game starts. It is the same code as <code>discord_game_sdk.dll</code> from the <a href="https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest">release</a> (sha256 <code id="modsha"></code>), built from the <a href="https://github.com/jevonlipsey/spelunky2-43aspect">source</a>. It patches the projection, viewport and 2D UI for 4:3 in memory and restores the audio that Android leaves muted. Settings live in <code>mod_43aspect.ini</code>.</p>
+    </details>
+
+    <p class="muted center">On Windows PC? You can skip this page: drop <code>discord_game_sdk.dll</code> from the <a href="https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest">latest release</a> into the game folder instead.</p>
+  </main>
+
+  <footer class="foot">
+    <p>Not affiliated with or endorsed by Mossmouth, LLC. It contains no game code and only modifies your own legally owned copy of the file.</p>
+    <p><a href="https://github.com/jevonlipsey/spelunky2-43aspect">Source on GitHub</a> · MIT</p>
+  </footer>
 </div>
-
-<div class="card" id="result">
-  <div id="status" role="status" aria-live="polite">Waiting for a file.</div>
-  <progress id="prog" value="0" max="1" hidden></progress>
-  <div id="detail" class="muted"></div>
-  <p style="margin-top:12px" id="dlwrap" hidden><button id="dl" type="button">Download patched Spel2.exe</button></p>
-</div>
-
-<div class="card" id="notes" hidden>
-  <strong>Before you use it</strong>
-  <ul>
-    <li>Keep a backup of your original <code>Spel2.exe</code>.</li>
-    <li>Put the patched file in the game folder, replacing the original. <code>mod_43aspect.ini</code> appears next to it on first launch.</li>
-    <li>Do not also install the mod's <code>discord_game_sdk.dll</code>. If both are there, the dll stays idle.</li>
-    <li>Steam "Verify integrity of game files" will undo the patch.</li>
-  </ul>
-</div>
-
-<p class="muted"><strong>Privacy:</strong> the file never leaves your device. Everything runs in this page, with no uploads and no external requests.</p>
-
-<details class="muted">
-  <summary>What does the patch do?</summary>
-  <p><strong>1. Android fix.</strong> The game reserves 5 blocks of 32 MiB at random address hints between <code>0x701</code> and <code>0x7FF</code> shifted left 32 bits, which is above 7 TiB, and retries forever when that fails. Android / ARM64 kernels with a 39-bit address space (512 GiB) can never satisfy that, so the game hangs. The patch changes two single bytes so hints stay at <code>0x01</code> to <code>0x7F</code> shifted left 32 bits (below 512 GiB):</p>
-  <ul>
-    <li><code>MOV RBX, 0x7017F800000</code> becomes <code>MOV RBX, 0x17F800000</code></li>
-    <li><code>AND ECX, 0xFE</code> becomes <code>AND ECX, 0x7E</code></li>
-  </ul>
-  <p>The page only patches when both spots are found exactly once, both stock or both already patched (by this page's older version or GabrielGabriel197's patcher). Otherwise it changes nothing.</p>
-  <p><strong>2. Native 4:3.</strong> The page adds the mod to <code>Spel2.exe</code> as a new section and runs it from the exe's entry point before the game starts. It is the same code as <code>discord_game_sdk.dll</code> from the <a href="https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest">release</a> (sha256 <code id="modsha"></code>), built from the <a href="https://github.com/jevonlipsey/spelunky2-43aspect">source</a>. It patches the projection, viewport and 2D UI for 4:3 in memory and restores the audio that Android leaves muted. Settings live in <code>mod_43aspect.ini</code>.</p>
-</details>
-
-<p class="muted">On Windows PC? You can skip this page: drop <code>discord_game_sdk.dll</code> from the <a href="https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest">latest release</a> into the game folder instead. Source: <a href="https://github.com/jevonlipsey/spelunky2-43aspect">jevonlipsey/spelunky2-43aspect</a>.</p>
-<p class="muted">Android fix based on the original patch by <a href="https://github.com/GabrielGabriel197/Spelunky2-Android-Patch" rel="noopener noreferrer">GabrielGabriel197/Spelunky2-Android-Patch</a>.</p>
-</main>
 
 <script id="payload">
 const MOD_DLL_SHA256 = '695d232cfb660e5295f6c564de6fe9fa223e35a13afed25afab9ca11e3833a40';
