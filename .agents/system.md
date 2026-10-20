@@ -768,6 +768,27 @@ baseline intact.** distinguish what you verified from what you predict.
 
 ## 12. launching the game — read this before trying
 
+### what works from ssh: start without steam (2026-10-20)
+
+```sh
+pid=$(ssh droiddeck 'pgrep -n konsole || pgrep -n lxqt-panel')   # any desktop process
+ssh droiddeck "python3 /root/ddlaunch.py $pid /usr/local/bin/droiddeck-gpu \
+    /usr/local/bin/droiddeck-proton-run --app 418530"
+```
+
+`droiddeck-proton-run --app` is droiddeck's "Start without Steam": it runs the
+game's proton directly, with no linux steam client, so the client-update trap
+below never fires. `droiddeck-gpu` puts it in a gamescope on the desktop's
+wayland, and `ddlaunch.py` borrows a desktop process's env so the ssh shell can
+reach that wayland. Spelunky boots to `Game initialized` in ~6 s and plays
+(screenshots via adb work). to stop it, SIGTERM the processes the run started
+(Spel2.exe, its steam.exe / proton / wine helpers / wineserver, the gamescope +
+gamescopereaper + `Xwayland :1` from droiddeck-gpu); gamescopereaper and one
+winedevice may need SIGKILL. never touch `Xwayland :0`, kwin, lxqt or
+droiddeck-session. still: the user normally launches; this is for test runs.
+
+### what breaks steam: driving the client
+
 the supported path is droiddeck's own: the desktop menu, or the android app's
 gaming session. a desktop menu click runs
 `steam steam://rungameid/<appid>`, which goes through

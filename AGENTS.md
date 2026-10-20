@@ -38,8 +38,10 @@ only when you need the dump — it causes the first-pause hitch).
   — those `.rdata` rects are entity/world data, not HUD geometry.
 - **`hud_fix` stays off.** never validated.
 - **do not trust `aspect_globals = 1`** in the ini; the code ignores it.
-- **the user launches the game, not you.** driving steam from ssh leaves the
-  client half-updated and unable to start any game (see §12).
+- **never drive the steam client from ssh.** it leaves the client half-updated
+  and unable to start any game. for test runs, start without steam
+  (`droiddeck-gpu droiddeck-proton-run --app 418530` via `ddlaunch.py`, §12);
+  otherwise the user launches.
 - the old dev repo (`~/Downloads/spelunky2-ARM`) is the archive: full commit
   history, run logs, `rollback/` builds, decomps, ghidra project, the
   `llm-experiments` branch (read it, **never merge it**). commit hashes and
@@ -48,10 +50,14 @@ only when you need the dump — it causes the first-pause hitch).
 ## status
 
 hud, pause menu, camp and world are all 4:3 and user-verified on device (pin11).
-the single-dll release (heap fix + 4:3 + audio, debug logging off) is **not yet
-verified on device**. the web patcher (`index.html`) now embeds that same dll in
-Spel2.exe as section `.m43` with an entry stub (`embedded_entry`); host-tested
-under wine, **not yet run on device**. the boot log's first line says
+v0.2.0 is verified on device (2026-10-20, boot `SUCCESS, 0 failures`, 4:3 in
+level and pause menu) both ways: the web patcher's exe (mod embedded as section
+`.m43`, entry stub -> `embedded_entry`) with the stock discord sdk, and the
+release dll on the stock exe. the device is left in the web-patcher setup
+(`Spel2.exe.stock` and `discord_game_sdk.dll.bak` sit beside it). known bug:
+`ini_get` reads only the first 4095 bytes, so keys past that in a long ini
+(the repo/device dev ini is 4.8 KB: `custom_zoom`, `heap_patch`, `force_audio`,
+`debug_log`) are ignored; the default ini (4073 B) fits. the boot log's first line says
 `(embedded in Spel2.exe)` or `(freestanding build)`. after any mod change run
 `make page` so the page carries the new dll. native windows pc has never been run. `make test` runs the
 host checks; it needs a stock `Spel2.exe` copied into the repo root (gitignored).
