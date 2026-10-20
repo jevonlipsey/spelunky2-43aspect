@@ -1,5 +1,7 @@
 # Spelunky 2 native 4:3 + Android compatibility
 
+**[Download the dll](https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest)** · **[Browser exe patcher](https://jevonlipsey.github.io/spelunky2-43aspect/)**
+
 A mod for Spelunky 2 that renders the game natively at 4:3 instead of letterboxed 16:9, and fixes the startup hang on Android (Proton via FEX). It also un-stretches the 2D UI for 4:3 and restores the sound that is otherwise missing on Android. It ships as a single `discord_game_sdk.dll` that the game loads in place of its Discord SDK.
 
 ## Install
@@ -7,7 +9,7 @@ A mod for Spelunky 2 that renders the game natively at 4:3 instead of letterboxe
 ### Option A: Full 4:3 + Android Compat
 
 1. Back up the game's original `discord_game_sdk.dll`.
-2. Download `discord_game_sdk.dll` from the [Releases](../../releases) page (or build it, see below) and copy it into the game folder, next to `Spel2.exe` (for example `steamapps/common/Spelunky 2/`), replacing the original.
+2. Download `discord_game_sdk.dll` from the [latest release](https://github.com/jevonlipsey/spelunky2-43aspect/releases/latest) (or build it, see below) and copy it into the game folder, next to `Spel2.exe` (for example `steamapps/common/Spelunky 2/`), replacing the original.
 3. Launch the game. `mod_43aspect.ini` is created next to `Spel2.exe` with defaults on first launch.
 
 Notes:
@@ -22,7 +24,7 @@ Notes:
 
 Applies only the Android compatibility (heap) patch, with the stock 16:9 picture.
 
-1. Open the patcher: `https://<user>.github.io/<repo>/` (TODO: replace with the real GitHub Pages link), or open `index.html` locally.
+1. Open the patcher: https://jevonlipsey.github.io/spelunky2-43aspect/ (or open `index.html` locally).
 2. Drag and drop your `Spel2.exe` onto the page and save the patched file over the original.
 
 Notes:
@@ -59,6 +61,10 @@ Needs `x86_64-w64-mingw32-gcc`.
 make release   # builds discord_game_sdk.dll from mod_43aspect.c
 make test      # host checks; the patcher test needs a stock Spel2.exe in the repo root
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE). Spelunky 2 is © Mossmouth; this project ships no game files and is not affiliated with Mossmouth or Discord.
 
 ## Credits
 
