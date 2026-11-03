@@ -32,6 +32,7 @@ No exe patching is needed (the dll applies the heap fix in memory too, so it als
 
 | key | default | what |
 |---|---|---|
+| `view` | `expand` | `expand` shows the full 16:9 width and adds height above and below (12.8 x 9.6 tiles). `crop` keeps the 16:9 height and cuts off the sides (9.6 x 7.2, the original behaviour). A number from `0` (crop) to `100` (expand) picks a point in between, e.g. `50` = 11.2 x 8.4. The camera's side limits follow the visible width at every setting. The older `keep_width = 1` / `0` is still read when `view` is absent |
 | `heap_patch` | `1` | shrink the allocator's address hint range so it fits Android's 39-bit address space. An exe already patched by the browser tool is tolerated |
 | `force_audio` | `1` | re-apply the `local.cfg` sfx / music volumes to the audio buses for the first minute (the game leaves them muted on Android) |
 | `custom_zoom` | `13.5` | camera zoom. 13.5 is vanilla. Do not raise it: at 15.0 or more the camera's vertical clamp has no valid range and the camera jitters on level entry |

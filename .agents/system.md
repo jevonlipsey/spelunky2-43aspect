@@ -26,6 +26,9 @@ that fails, so discord rich presence is off.
   2d ui got there.
 - **not yet on device**: the single-dll release (heap patch + audio port +
   debug off, which is also the first-pause lag fix). pc never run.
+- **4.3 (2026-11, §15)**: `view = expand` (16:9 width, 4/3 height) and
+  `ui_2d_band` (menus shrink as one picture) are the defaults, verified on a
+  second retroid pocket nova. the journal pages still misalign in band mode.
 
 ---
 
@@ -1166,3 +1169,115 @@ session restart before their games work again.
   rollback: `rollback/pin11-shim/` holds the shim dll + the pin11 mod dll/ini.
   restore by putting the shim dll back in the game dir as `discord_game_sdk.dll`
   and the mod dll/ini in `/root/Storage/Download/`. **not yet on device.**
+- 4.3 (2026-11, §15): `view` (expand by default, crop, or 0..100), the camera
+  clamp's side limit following the visible width (`cam_extents` now does
+  something), `ui_2d_band` (default on) with the off-frame cull and the hud
+  memory, and `ini_get` reading up to 16 KB. verified on a second retroid
+  pocket nova (android, droiddeck) as the drop-in dll.
+
+---
+
+## 15. view modes, the camera clamp and band (2026-11)
+
+### expand: the 16:9 width with more height (`view`)
+crop (the old default) keeps the 16:9 height and narrows the width:
+`m00 = m11 / aspect`, 9.6 x 7.2 tiles. expand keeps the stock `m00` and
+shrinks `m11` instead, 12.8 x 9.6 tiles. `view` blends the two: the visible
+height is `k = 1 + t * (16/9 / aspect - 1)` times stock (`t` = 0..1), with
+`m11 = 2.41421 / k` and `m00 = m11 / aspect`, so a tile stays square at every
+setting. `custom_zoom` is untouched.
+
+the extra height has to reach everything that sizes the view, or the new rows
+stay empty (the entity / floor tile draw list culls 0.5 tiles past the view).
+every such place computes the half-height as `zoom * tan(a)` through the
+game's fast sine (`(|x| - 0.5) * 16x`, refined by 0.225; angles in turns) and
+the width as `1.7778 *` that. the half-angle is four shared `.rdata` floats,
+read by exactly ten functions and nothing else:
+
+| rva | stock | meaning |
+|---|---|---|
+| `0x22d0c398` | 0.43749 | `0.5 - a`, only feeds a floor (always 0) |
+| `0x22d0c39c` | 0.18749 | `0.25 - a`, the numerator's angle |
+| `0x22d0c3a0` | 0.3125 | `a + 0.25`, only feeds a floor |
+| `0x22d0c3a4` | 0.0625 | `a` = 22.5 deg, the denominator's angle |
+
+the ten readers: `0x22b7d040` camera clamp, `0x22c9fab0` entity draw list,
+`0x22c9b210` tile range (+3 tile margin), `0x22b665e0` (a list under the draw
+list), `0x22910e60` and `0x22908aa0` (an on-screen test and a spawn above the
+view), and the four 2d text-run culls `0x22b932a0` `0x22b93ab0` `0x22b94440`
+`0x22b94d30`. the mod bisects for the `a` whose `tan` is `k` times stock with
+the same fast sine (expand: `a` 0.0625 -> 0.080249 turns) and writes all four.
+the width they derive is then `k` too wide, which only makes the culls
+generous, except in the clamp.
+
+### the camera clamp (`0x22b7d040`)
+the clamp keeps the camera's focus within its bounds by `1.7778 * h`
+sideways and `h` vertically, `h` from the shared half-angle above. it has to
+stay at the stock height (a taller `h` is the >= 15.0 zoom jitter), so its two
+angle loads are re-aimed at stock-valued copies that nothing writes:
+
+| site | stock load | now loads |
+|---|---|---|
+| `0x22b7d0a8` `f30f1015 ecf21800` | `0x22d0c39c` | `0x22d0d520` (0.1875) |
+| `0x22b7d158` `f30f102d 44f21800` | `0x22d0c3a4` | `0x22d0ce60` (0.0625) |
+
+its sideways limit is `1.7778 * h`, the 16:9 width. narrower than that (crop
+and anything short of expand) and the camera stops short of the side walls,
+so the player walks off the visible edge. `cam_extents` (it only logged a
+skip before) re-aims the clamp's `1.7778` load at `0x22b7d228`
+(`f30f100d 70f21800`) at a float of the mod's own, `k * aspect`, written into
+the zero slack after `.rdata`'s last byte (`0x22dea3c0`; `.rdata` ends at
+`0x22dea3b4`, the page at `0x22deb000`; nothing references it).
+
+### menus are 2d, not the camera
+character select, the options screen and the journal look the same in crop
+and expand (pixel-compared on device): their frames, doors and art are 2d
+batches, not the camera scene. their misalignment came from scaling each
+element about its own centre: each piece shrinks in place, so a composite of
+pieces drawn separately comes apart:
+- character select: the doorway sill lands across the character, the frame
+  stops short of the screen edges.
+- options: the cursor bar (one centred quad) is caught by `ui_2d_center` and
+  moves towards the middle while its row text stays put; it lines up only on
+  the row nearest the screen's centre line.
+- game over: the menu card shrinks while its rows keep their 16:9 spacing, so
+  the last row hangs below it; the stat strips split from their text.
+- speech bubbles: body, text and tail are separate batches; the tail ends up
+  over the text.
+with `ui_2d_scale = 0` (unscaled, stretched 4/3 tall) every one of these
+lines up, which is what pointed at the per-element anchor.
+
+### band (`ui_2d_band = 1`)
+every element that is not pinned anchors at the screen's centre line (0), so
+the whole 2d layer shrinks as one picture: menus keep their 16:9 proportions
+in the middle of the screen, every piece stays where it belongs relative to
+the others, and the background shows in a band above and below. pinned
+elements (the hud) keep their edge anchors. two consequences:
+- a column (rope) keeps its top segment's anchor ahead of band, so a column
+  whose top pins is not torn (`T2`).
+- an element entirely past +-1 was off the 16:9 frame (a scrolled-away
+  options row) but would shrink into the band; it is sent to y = +-2 instead.
+  the list has no scissor: `0x22ce4130` (patched as `ui_scissor_full`) is the
+  canvas-size clamp, not a clip.
+
+### the hud memory
+the udjat eye blinks open in a flush of its own, drawn larger and with an
+outline pulse growing around it. drawn with the right hand hud row it pins
+(the row's cluster centre is far out), but alone its centre (~+0.1) fails
+the corner test (`ui_2d_pinx`), so band pulled it ~130 px down. every pinned
+cluster's box is remembered for `UI_2D_HUD_MS` (500 ms); a cluster in a batch
+that does not pin pins with the hud when its **centre** lies in a fresh box
+(the pulse outgrows the icon, so containment fails). the hud redraws every
+frame, so the boxes stay fresh in play and lapse on a menu. the override is
+applied after the column memory so no column inherits it (`T13`).
+
+### not done
+- **the journal pages** still misalign in band mode (open on device).
+- **world-anchored labels**: band moves every non-pinned element towards the
+  centre, which is right for menus but would also pull 2d labels attached to
+  world positions. the shop price box and speech bubbles looked right on
+  device, so this has not been seen to matter; a per-screen switch (band on
+  menus, own-centre in levels) would need the current screen from the game's
+  state.
+- `make test`: the host tests pin `ui_2d_band = 0` for `T1`-`T12`, which
+  describe the per-element behaviour; `T13` covers band.

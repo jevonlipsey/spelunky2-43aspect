@@ -19,7 +19,7 @@
 
 #define fabsf(x) __builtin_fabsf(x)
 
-#define MOD_VERSION    "mod_43aspect 4.2"
+#define MOD_VERSION    "mod_43aspect 4.3"
 #define DEFAULT_ASPECT  1.3333334f
 #define ORIGINAL_ASPECT 1.7777778f
 #define ORIGINAL_INV    0.5625f
@@ -265,6 +265,23 @@ static void my_format(char* out, size_t outsz, const char* fmt, ...) {
 #define RVA_CAM_EXT_F87C  0x22d0f87cu
 
 #define RVA_LETTERBOX_JBE 0x22cc197fu
+
+/* the visible half-height in world units is zoom * tan(a), where tan(a) is
+ * sin(-a) / sin(a - 0.25) through the game's fast sine (angle in turns).
+ * a = 0.0625 turns = 22.5 deg, the same half-angle as m11 = 2.41421. the
+ * constants are stored as 0.5 - a, 0.25 - a, a + 0.25 and a; the first and
+ * third only feed a floor (always 0), the second and fourth are the angle.
+ * ten functions read them, nothing else does: the camera clamp, the entity
+ * and tile draw list, the tile range, the 2d text cull rect, two "is it on
+ * screen" checks and one spawn-above-the-screen. each takes the width as
+ * 1.7778 * that height. */
+#define RVA_VIEW_FLOOR_N 0x22d0c398u
+#define RVA_VIEW_ANGLE_N 0x22d0c39cu
+#define RVA_VIEW_FLOOR_D 0x22d0c3a0u
+#define RVA_VIEW_ANGLE_D 0x22d0c3a4u
+
+/* what the watchdog holds the projection at; 0 = leave that entry alone */
+static float g_want_m00 = 0.0f, g_want_m11 = 0.0f;
 
 #define RVA_ZOOM_DEFAULT 0x22d0d120u
 #define RVA_ZOOM_SHOP    0x22d0e904u
@@ -759,9 +776,8 @@ static DWORD WINAPI matrix_report_thread(LPVOID unused) {
         safe_read_float(g_base + RVA_CAM_Y_SCALE, &ys);
 
         // Also run live heap scanner to patch any copies Spel2.exe made to runtime memory
-        float want00 = g_aspect != 0.0f ? 2.4142136f / g_aspect : 0.0f;
-        if (want00 > 0.0f && g_do_live_scan) {
-            scan_and_patch_live_matrices(want00, 2.4142136f);
+        if (g_want_m00 > 0.0f && g_do_live_scan) {
+            scan_and_patch_live_matrices(g_want_m00, 2.4142136f);
         }
 
         float vhalf = zoom * ys;
@@ -788,15 +804,17 @@ static DWORD WINAPI matrix_report_thread(LPVOID unused) {
 
 static DWORD WINAPI watchdog_thread(LPVOID unused) {
     (void)unused;
-    float want00 = g_aspect != 0.0f ? 2.4142136f / g_aspect : 0.0f;
+    float want00 = g_want_m00, want11 = g_want_m11;
     for (int tick = 0; tick < 1800; tick++) { // 90 seconds @ 50ms intervals
         Sleep(50);
-        float m00 = 0.0f, am = 0.0f;
-        if (safe_read_float(g_base + RVA_PROJ_M00, &m00)) {
-            safe_read_float(g_base + RVA_ASPECT_MAIN, &am);
-            if (want00 > 0.0f && fabsf(m00 - want00) > TOLERANCE) {
-                write_float(g_base + RVA_PROJ_M00, want00);
-            }
+        float m00 = 0.0f, m11 = 0.0f;
+        if (want00 > 0.0f && safe_read_float(g_base + RVA_PROJ_M00, &m00) &&
+            fabsf(m00 - want00) > TOLERANCE) {
+            write_float(g_base + RVA_PROJ_M00, want00);
+        }
+        if (want11 > 0.0f && safe_read_float(g_base + RVA_PROJ_M11, &m11) &&
+            fabsf(m11 - want11) > TOLERANCE) {
+            write_float(g_base + RVA_PROJ_M11, want11);
         }
         // High-frequency lock on all dynamic constant buffer heap pointers
         if (want00 > 0.0f && g_live_m00_count > 0) {
@@ -810,11 +828,18 @@ static DWORD WINAPI watchdog_thread(LPVOID unused) {
             }
         }
     }
-    log_raw("[watch] 90s clean, dynamic m00 maintained");
+    log_raw("[watch] 90s clean, projection maintained");
     return 0;
 }
 
 static int   g_do_world = 1, g_do_noletterbox = 1, g_do_camext = 1;
+/* how far the view moves from crop (0) to expand (1). crop keeps the 16:9
+ * height and cuts the sides; expand keeps the 16:9 width and adds height.
+ * in between, the visible height is k = 1 + t * (16/9 / aspect - 1) times
+ * stock and the width follows from the aspect, so nothing stretches. */
+static float g_view_expand = 1.0f;
+/* the visible height over stock that the projection ended up with */
+static float g_view_height = 1.0f;
 static int   g_do_aspect_globals = 1, g_do_proj_constants = 0, g_do_aspect_vectors = 0, g_do_runtime_immediates = 0;
 static int   g_do_ui_quads = 0;
 static int   g_do_hud_fix = 0;
@@ -969,6 +994,12 @@ static float g_ui_2d_rowgap  = 0.05f;
 static int   g_ui_2d_fill    = 1;
 static int   g_ui_2d_bars    = 0;
 static int   g_ui_2d_center  = 1;
+/* 1 = scale every element that isn't pinned to an edge about the screen's
+ * centre line, so a whole menu shrinks as one picture: it keeps its 16:9
+ * proportions and its pieces stay lined up with each other (the cursor bar with
+ * its row, a character with the doorway it stands in), with a band of the
+ * background above and below it. 0 = scale each element about its own centre. */
+static int   g_ui_2d_band    = 1;
 static int   g_do_ui_2d_dump = 0;
 static int   g_ui_2d_batches = 0;
 static int   g_ui_2d_verts   = 0;
@@ -1222,7 +1253,7 @@ static int ui_2d_chain_find(float x0, float x1, float mean) {
  * was authored and hung it off the shrunk board. */
 static float ui_2d_anchor(int pins, float mean, float xmin, float xmax, float ymin, float ymax,
                           int* slot, int* narrow) {
-    float a = pins ? (mean >= 0.0f ? 1.0f : -1.0f) : mean;
+    float a = pins ? (mean >= 0.0f ? 1.0f : -1.0f) : (g_ui_2d_band ? 0.0f : mean);
 
     *slot = -1;
     *narrow = 0;
@@ -1250,6 +1281,63 @@ static int ui_2d_keep(int ngroups, float xmin, float xmax, float ymin, float yma
     if (h >= UI_2D_FILL_SPAN) return 1;
     if (h >= UI_2D_FRAME_MIN && ui_2d_absf(w - h) <= UI_2D_FRAME_TOL * h) return 1;
     if (ngroups >= UI_2D_ROPE_N && w <= UI_2D_ROPE_W && h >= UI_2D_FRAME_MIN) return 1;
+    return 0;
+}
+
+/* how far past +-1 an element must sit to count as off the 16:9 frame */
+#define UI_2D_OFFSCREEN_MARGIN 0.02f
+
+/* band: the hud. a pinned batch's clusters are remembered for a moment; a
+ * cluster in a batch that does not pin, centred inside one of those boxes, is a
+ * hud piece drawn on its own (the udjat eye blinks open in a flush of its own,
+ * larger than the icon and with an outline pulse growing around it, and alone
+ * its centre fails the corner test) and pins with them instead of shrinking
+ * towards the centre. the centre is tested, not the extent, because those
+ * pieces outgrow the icon's box. the hud redraws every frame, so the boxes stay
+ * fresh in play and lapse within UI_2D_HUD_MS on a menu, where none is drawn. */
+#ifndef UI_2D_NOW_MS
+#define UI_2D_NOW_MS() ((uint32_t)GetTickCount())
+#endif
+#define UI_2D_HUD_N      16
+#define UI_2D_HUD_MS     500u
+#define UI_2D_HUD_MARGIN 0.02f
+
+static float    g_ui_2d_hud_x0[UI_2D_HUD_N], g_ui_2d_hud_x1[UI_2D_HUD_N];
+static float    g_ui_2d_hud_y0[UI_2D_HUD_N], g_ui_2d_hud_y1[UI_2D_HUD_N];
+static uint32_t g_ui_2d_hud_t[UI_2D_HUD_N];
+static int      g_ui_2d_hud_used[UI_2D_HUD_N];
+static int      g_ui_2d_hud_next = 0;
+
+static void ui_2d_hud_remember(float xmin, float xmax, float ymin, float ymax) {
+    uint32_t now = UI_2D_NOW_MS();
+    int i, s = -1;
+    /* refresh a box that is already known, else take the next slot */
+    for (i = 0; i < UI_2D_HUD_N; i++) {
+        if (g_ui_2d_hud_used[i] && ui_2d_absf(g_ui_2d_hud_x0[i] - xmin) < 0.01f
+            && ui_2d_absf(g_ui_2d_hud_x1[i] - xmax) < 0.01f
+            && ui_2d_absf(g_ui_2d_hud_y0[i] - ymin) < 0.01f
+            && ui_2d_absf(g_ui_2d_hud_y1[i] - ymax) < 0.01f) { s = i; break; }
+    }
+    if (s < 0) {
+        s = g_ui_2d_hud_next;
+        g_ui_2d_hud_next = (g_ui_2d_hud_next + 1) % UI_2D_HUD_N;
+    }
+    g_ui_2d_hud_used[s] = 1;
+    g_ui_2d_hud_x0[s] = xmin; g_ui_2d_hud_x1[s] = xmax;
+    g_ui_2d_hud_y0[s] = ymin; g_ui_2d_hud_y1[s] = ymax;
+    g_ui_2d_hud_t[s] = now;
+}
+
+static int ui_2d_hud_inside(float xmin, float xmax, float ymin, float ymax) {
+    uint32_t now = UI_2D_NOW_MS();
+    float cx = (xmin + xmax) * 0.5f, cy = (ymin + ymax) * 0.5f;
+    int i;
+    for (i = 0; i < UI_2D_HUD_N; i++) {
+        if (!g_ui_2d_hud_used[i] || (uint32_t)(now - g_ui_2d_hud_t[i]) > UI_2D_HUD_MS) continue;
+        if (cx >= g_ui_2d_hud_x0[i] - UI_2D_HUD_MARGIN && cx <= g_ui_2d_hud_x1[i] + UI_2D_HUD_MARGIN
+            && cy >= g_ui_2d_hud_y0[i] - UI_2D_HUD_MARGIN && cy <= g_ui_2d_hud_y1[i] + UI_2D_HUD_MARGIN)
+            return 1;
+    }
     return 0;
 }
 
@@ -1283,6 +1371,7 @@ static int ui_2d_apply_runs(uint8_t* v0, int n, float sy, float sx) {
          * else hand this quad's own centre to the segments below. the test is
          * per cluster, not per batch: the camp flushes both of its banner
          * ropes in one batch (n 8, two narrow clusters). */
+        if (g_ui_2d_band && pins) ui_2d_hud_remember(xmin, xmax, ymin, ymax);
         {
             int s, narrow;
             anchor = ui_2d_anchor(pins, mean, xmin, xmax, ymin, ymax, &s, &narrow);
@@ -1297,11 +1386,28 @@ static int ui_2d_apply_runs(uint8_t* v0, int n, float sy, float sx) {
                 g_ui_2d_chcy[s] = mean;
                 g_ui_2d_chanchor[s] = anchor;
             }
+            /* after the column memory, so a column never inherits a pin that
+             * only held while the hud box was fresh */
+            if (g_ui_2d_band && !pins && ui_2d_hud_inside(xmin, xmax, ymin, ymax))
+                anchor = mean >= 0.0f ? 1.0f : -1.0f;
         }
 
         /* fills, backdrops, full-frame images and the scene rope are left at
          * full height, see ui_2d_keep */
         if (fill && ui_2d_keep(g1 - g, xmin, xmax, ymin, ymax)) {
+            g = g1;
+            continue;
+        }
+        /* band: an element entirely past the top or bottom of the 16:9 frame
+         * was off screen, but shrinking towards the centre would bring it into
+         * the band of background above or below the menu (a scrolled-away
+         * options row). send it off screen instead. world geometry (y in the
+         * tens) is left alone. */
+        if (g_ui_2d_band && !pins && ymin < UI_2D_NDC_Y && ymax > -UI_2D_NDC_Y
+            && (ymin > 1.0f + UI_2D_OFFSCREEN_MARGIN || ymax < -1.0f - UI_2D_OFFSCREEN_MARGIN)) {
+            float away = ymin > 1.0f ? 2.0f : -2.0f;
+            for (k = g * g_ui_2d_vpq; k < last; k++)
+                ui_2d_stf(v0 + (uintptr_t)k * 0x18u + 4, away);
             g = g1;
             continue;
         }
@@ -1969,6 +2075,11 @@ static void write_default_ini(void) {
         "; spelunky 2 native 4:3\n"
         "[aspect]\n"
         "aspect_ratio = 1.3333334\n"
+        "; expand = show the full 16:9 width and add height above and below.\n"
+        "; crop = keep the 16:9 height and cut off the sides (the original mod).\n"
+        "; or a number from 0 (crop) to 100 (expand) for anything in between:\n"
+        "; 50 = 11.2 x 8.4 tiles, between 9.6 x 7.2 and 12.8 x 9.6.\n"
+        "view = expand\n"
         "world_projection = 1\n"
         "no_letterbox = 1\n"
         "cam_extents = 1\n"
@@ -2022,6 +2133,11 @@ static void write_default_ini(void) {
         "; 1 = clusters on the centre line scale about y = 0 instead of their own\n"
         "; centre, so pause / confirm text follows its shrunk board.\n"
         "ui_2d_center = 1\n"
+        "; 1 = shrink every menu as one picture about the screen centre, so it keeps\n"
+        "; its shape and its pieces stay lined up (cursor bars, characters in their\n"
+        "; doorways), with a band of background above and below. the hud stays\n"
+        "; pinned to the screen edges. 0 = shrink each piece about its own centre.\n"
+        "ui_2d_band = 1\n"
         "; heap scan for stray copies of the projection matrix. never matched, off.\n"
         "live_scan = 0\n"
         "; the layer is scaled per element, not about the screen centre: quads whose\n"
@@ -2100,7 +2216,7 @@ static char* trim(char* s) {
 
 static int ini_get(const char* section, const char* key,
                    char* out, int outsz, const char* def) {
-    static char buf[4096];
+    static char buf[16384];
     lstrcpynA(out, def, outsz);
     if (!read_whole_file(g_ini_path, buf, (int)sizeof(buf))) return 0;
 
@@ -2187,6 +2303,19 @@ static void read_ini(void) {
     g_do_world       = ini_get_int("aspect", "world_projection", 1) != 0;
     g_do_noletterbox = ini_get_int("aspect", "no_letterbox", 1) != 0;
     g_do_camext      = ini_get_int("aspect", "cam_extents", 1) != 0;
+    /* view = crop | expand | 0..100 (percent of the way to expand);
+     * keep_width = 1 | 0 is the older spelling */
+    if (ini_get("aspect", "view", buf, (int)sizeof(buf), "expand")) {
+        char* v = trim(buf);
+        if (ieq(v, "crop")) g_view_expand = 0.0f;
+        else if (ieq(v, "expand")) g_view_expand = 1.0f;
+        else if (*v >= '0' && *v <= '9') g_view_expand = parse_float(v) / 100.0f;
+        else g_view_expand = 1.0f;
+    } else {
+        g_view_expand = ini_get_int("aspect", "keep_width", 1) != 0 ? 1.0f : 0.0f;
+    }
+    if (g_view_expand < 0.0f) g_view_expand = 0.0f;
+    if (g_view_expand > 1.0f) g_view_expand = 1.0f;
 
     g_do_hud_fix     = ini_get_int("aspect", "hud_fix", 0) != 0;
     ini_get("aspect", "hud_x_scale", buf, (int)sizeof(buf), "1.0");
@@ -2233,6 +2362,7 @@ static void read_ini(void) {
     g_ui_2d_fill = ini_get_int("aspect", "ui_2d_fill", 1) != 0;
     g_ui_2d_bars = ini_get_int("aspect", "ui_2d_bars", 0) != 0;
     g_ui_2d_center = ini_get_int("aspect", "ui_2d_center", 1) != 0;
+    g_ui_2d_band = ini_get_int("aspect", "ui_2d_band", 1) != 0;
     g_do_live_scan = ini_get_int("aspect", "live_scan", 0) != 0;
     g_do_heap_patch = ini_get_int("aspect", "heap_patch", 1) != 0;
     g_do_force_audio = ini_get_int("aspect", "force_audio", 1) != 0;
@@ -2426,6 +2556,102 @@ static DWORD WINAPI audio_thread(LPVOID unused) {
     return 0;
 }
 
+/* ### keep_width: the view grows taller instead of narrower
+ *
+ * m11 alone makes the picture taller, but the game would still think the view
+ * is 7.2 tiles tall: entities and floor tiles in the new rows at the top and
+ * bottom are culled (0.5 tile margin) and never drawn. so the shared view
+ * half-angle (RVA_VIEW_*) is widened until zoom * tan(a) is the new height.
+ * the width every reader derives from it (1.7778 * height) then comes out
+ * 4/3 too wide, which only makes the culls generous - except in the camera
+ * clamp, where it would park the camera short of the level's side walls.
+ * the clamp's two angle loads are pointed at stock-valued copies instead,
+ * so its x and y limits stay exactly vanilla: x is the real 16:9 width, and
+ * y keeps the 7.2 tile range (a taller one is what made the camera jut on
+ * level entry when custom_zoom was raised). */
+
+/* the game's sine, angle in turns: (|x| - 0.5) * 16x, refined by 0.225 */
+static float game_sin(float x) {
+    float y = (fabsf(x) - 0.5f) * 16.0f * x;
+    return (fabsf(y) - 1.0f) * (0.225f * y) + y;
+}
+
+static float game_tan(float a) {
+    return game_sin(-a) / game_sin(a - 0.25f);
+}
+
+/* the clamp's movss loads of the two angle constants, stock and re-aimed at
+ * exact 0.1875 (0x22d0d520) and 0.0625 (0x22d0ce60), both read-only elsewhere */
+#define RVA_CLAMP_ANGLE_N 0x22b7d0a8u
+#define RVA_CLAMP_ANGLE_D 0x22b7d158u
+#define RVA_ANGLE_N_COPY  0x22d0d520u
+#define RVA_ANGLE_D_COPY  0x22d0ce60u
+
+static void patch_view_height(float ratio) {
+    static const unsigned char n_orig[] = { 0xF3, 0x0F, 0x10, 0x15, 0xEC, 0xF2, 0x18, 0x00 };
+    static const unsigned char n_repl[] = { 0xF3, 0x0F, 0x10, 0x15, 0x70, 0x04, 0x19, 0x00 };
+    static const unsigned char d_orig[] = { 0xF3, 0x0F, 0x10, 0x2D, 0x44, 0xF2, 0x18, 0x00 };
+    static const unsigned char d_repl[] = { 0xF3, 0x0F, 0x10, 0x2D, 0x00, 0xFD, 0x18, 0x00 };
+    float an = 0.0f, ad = 0.0f, cn = 0.0f, cd = 0.0f;
+    char buf[160];
+
+    if (!safe_read_float(g_base + RVA_VIEW_ANGLE_N, &an) ||
+        !safe_read_float(g_base + RVA_VIEW_ANGLE_D, &ad) ||
+        !safe_read_float(g_base + RVA_ANGLE_N_COPY, &cn) ||
+        !safe_read_float(g_base + RVA_ANGLE_D_COPY, &cd) ||
+        fabsf(an - 0.1875f) > 0.001f || fabsf(ad - 0.0625f) > 0.001f ||
+        cn != 0.1875f || cd != 0.0625f) {
+        log_raw("[FAIL] view_height: angle constants not stock, view stays 16:9 tall");
+        g_failures++;
+        return;
+    }
+
+    /* the clamp first: if it cannot keep the stock angle, a taller angle
+     * would move its limits, so leave everything alone */
+    if (!patch_bytes(g_base + RVA_CLAMP_ANGLE_N, n_orig, n_repl, sizeof(n_orig), "clamp_angle_n") ||
+        !patch_bytes(g_base + RVA_CLAMP_ANGLE_D, d_orig, d_repl, sizeof(d_orig), "clamp_angle_d")) {
+        log_raw("[FAIL] view_height: clamp not redirected, culls left at 16:9");
+        return;
+    }
+
+    /* tan is monotonic on [a, 0.2]; bisect for the angle whose height is
+     * ratio times stock */
+    float want = game_sin(an - 0.25f) / game_sin(ad - 0.25f) * ratio;
+    float lo = ad, hi = 0.2f;
+    for (int i = 0; i < 40; i++) {
+        float mid = 0.5f * (lo + hi);
+        if (game_tan(mid) < want) lo = mid; else hi = mid;
+    }
+    patch_float(g_base + RVA_VIEW_FLOOR_N, 0.4375f, 0.4375f, 0.5f - lo,  "view_floor_n");
+    patch_float(g_base + RVA_VIEW_ANGLE_N, 0.1875f, 0.1875f, 0.25f - lo, "view_angle_n");
+    patch_float(g_base + RVA_VIEW_FLOOR_D, 0.3125f, 0.3125f, lo + 0.25f, "view_floor_d");
+    patch_float(g_base + RVA_VIEW_ANGLE_D, 0.0625f, 0.0625f, lo,         "view_angle_d");
+
+    char s_a[32], s_r[32];
+    fmt_float(lo, 6, s_a, sizeof(s_a));
+    fmt_float(ratio, 5, s_r, sizeof(s_r));
+    my_format(buf, sizeof(buf), "[*] view half-angle 0.0625 -> %s turns (height x%s)", s_a, s_r);
+    log_raw(buf);
+}
+
+/* the clamp's load of 1.7778 (shared by 57 other readers), re-aimed at a
+ * float of our own in the zero slack after .rdata's last byte (0x22dea3b4)
+ * and before the next page. nothing in the exe references that slack. */
+#define RVA_CLAMP_WIDTH   0x22b7d228u
+#define RVA_CLAMP_WIDTH_K 0x22dea3c0u
+
+static void patch_clamp_width(float half_w_per_h) {
+    static const unsigned char w_orig[] = { 0xF3, 0x0F, 0x10, 0x0D, 0x70, 0xF2, 0x18, 0x00 };
+    static const unsigned char w_repl[] = { 0xF3, 0x0F, 0x10, 0x0D, 0x90, 0xD1, 0x26, 0x00 };
+    if (half_w_per_h > ORIGINAL_ASPECT - 0.0001f) {
+        log_raw("[skip] clamp_width: view is the full 16:9 width");
+        return;
+    }
+    /* the constant first, so the redirected load never reads a zero */
+    if (patch_float(g_base + RVA_CLAMP_WIDTH_K, 0.0f, 0.0f, half_w_per_h, "clamp_width_k"))
+        patch_bytes(g_base + RVA_CLAMP_WIDTH, w_orig, w_repl, sizeof(w_orig), "clamp_width");
+}
+
 static void apply_patches(void) {
     static LONG claimed = 0;
     if (InterlockedCompareExchange(&claimed, 1, 0) != 0) return;
@@ -2451,6 +2677,8 @@ static void apply_patches(void) {
 
     char toggle[512], s_ar[32], s_zoom[32], s_hexbase[32], s_hud[32], s_uix[32], s_uiy[32], s_u2x[32], s_u2e[32], s_u2p[32], s_u2c[32], s_u2px[32], s_u2rg[32];
     fmt_float(target_aspect, 5, s_ar, sizeof(s_ar));
+    char s_view[32];
+    fmt_float(g_view_expand * 100.0f, 0, s_view, sizeof(s_view));
     fmt_float(g_custom_zoom, 2, s_zoom, sizeof(s_zoom));
     fmt_float(g_hud_x_scale, 5, s_hud, sizeof(s_hud));
     fmt_float(g_ui_scale_x, 5, s_uix, sizeof(s_uix));
@@ -2463,10 +2691,10 @@ static void apply_patches(void) {
     fmt_float(g_ui_2d_rowgap, 3, s_u2rg, sizeof(s_u2rg));
     fmt_hex64(g_base, s_hexbase, sizeof(s_hexbase));
 
-    my_format(toggle, sizeof(toggle), "[*] ar=%s world=%d no_lb=%d cam=%d quads=%d(x%s y%s) hud=%d(x%s) uilb=%d ui2d=%d(x%s edge%s fill%d bars%d ctr%d pin%s cl%s px%s rg%s) (gl=%d pc=%d vec=%d ri=%d) zoom=%s heap=%d audio=%d dbg=%d",
-              s_ar, g_do_world, g_do_noletterbox, g_do_camext,
+    my_format(toggle, sizeof(toggle), "[*] ar=%s view=%s%% world=%d no_lb=%d cam=%d quads=%d(x%s y%s) hud=%d(x%s) uilb=%d ui2d=%d(x%s edge%s fill%d bars%d ctr%d band%d pin%s cl%s px%s rg%s) (gl=%d pc=%d vec=%d ri=%d) zoom=%s heap=%d audio=%d dbg=%d",
+              s_ar, s_view, g_do_world, g_do_noletterbox, g_do_camext,
               g_do_ui_quads, s_uix, s_uiy, g_do_hud_fix, s_hud, g_do_ui_letterbox,
-              g_do_ui_2d, s_u2x, s_u2e, g_ui_2d_fill, g_ui_2d_bars, g_ui_2d_center, s_u2p, s_u2c, s_u2px, s_u2rg,
+              g_do_ui_2d, s_u2x, s_u2e, g_ui_2d_fill, g_ui_2d_bars, g_ui_2d_center, g_ui_2d_band, s_u2p, s_u2c, s_u2px, s_u2rg,
               g_do_aspect_globals, g_do_proj_constants, g_do_aspect_vectors, g_do_runtime_immediates,
               s_zoom, g_do_heap_patch, g_do_force_audio, g_debug);
 
@@ -2505,13 +2733,25 @@ static void apply_patches(void) {
             log_raw("[FAIL] proj_m11 unreadable");
             g_failures++;
         } else {
-            char s_m11[32], s_m00[32];
-            fmt_float(m11, 5, s_m11, sizeof(s_m11));
-            fmt_float(m11 * inv_target, 5, s_m00, sizeof(s_m00));
-            my_format(buf, sizeof(buf), "[*] m11=%s m00:=%s", s_m11, s_m00);
+            /* k = visible height over stock. m11 shrinks by k, and m00
+             * is always m11 / aspect so a tile stays square */
+            char s_m11[32], s_m00[32], s_k[32];
+            float kmax = ORIGINAL_ASPECT * inv_target;
+            if (kmax < 1.0f) kmax = 1.0f;
+            g_view_height = 1.0f + g_view_expand * (kmax - 1.0f);
+            float want11 = m11 / g_view_height;
+            float want00 = want11 * inv_target;
+            fmt_float(g_view_height, 5, s_k, sizeof(s_k));
+            fmt_float(want00, 5, s_m00, sizeof(s_m00));
+            fmt_float(want11, 5, s_m11, sizeof(s_m11));
+            my_format(buf, sizeof(buf), "[*] view height x%s: m00:=%s m11:=%s", s_k, s_m00, s_m11);
             log_raw(buf);
-            patch_float(g_base + RVA_PROJ_M00, 1.3579950f, m11 * inv_target,
-                        m11 * inv_target, "proj_m00");
+            int ok00 = patch_float(g_base + RVA_PROJ_M00, 1.3579950f, want00, want00, "proj_m00");
+            int ok11 = patch_float(g_base + RVA_PROJ_M11, 2.4142136f, want11, want11, "proj_m11");
+            if (ok00) g_want_m00 = want00;
+            if (ok11) g_want_m11 = want11;
+            if (ok00 && ok11 && g_view_height > 1.0001f) patch_view_height(g_view_height);
+            else if (!ok11) g_view_height = 1.0f;
         }
     } else {
         log_raw("[skip] world_projection off");
@@ -2550,9 +2790,12 @@ static void apply_patches(void) {
         log_raw("[skip] no_letterbox off");
     }
 
-    /* 3. camera extents */
-    if (g_do_camext) {
-        log_raw("[skip] cam_extents off (prevents camera rope jitter)");
+    /* 3. camera extents: the clamp's side limit is 1.7778 * its stock
+     * half-height, the 16:9 width. narrower than that and the camera parks
+     * short of the side walls, so the player walks off the visible edge.
+     * its y limit is left alone (a taller one brings back the jitter). */
+    if (g_do_camext && g_do_world) {
+        patch_clamp_width(g_view_height * target_aspect);
     } else {
         log_raw("[skip] cam_extents off");
     }
