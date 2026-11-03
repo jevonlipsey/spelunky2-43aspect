@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+static uint32_t test_now_ms = 0;
+#define UI_2D_NOW_MS() test_now_ms
 #include "alg.inc"
 
 #define SY 0.75f
@@ -535,16 +537,61 @@ static void t11(void) {
 }
 
 typedef void (*fn)(void);
+/* ---- T13 band: a hud piece drawn on its own pins with the hud ---- */
+static void t13(void) {
+    float before;
+    g_ui_2d_band = 1;
+    reset_chain();
+    test_now_ms = 1000;
+    /* the right hand hud row: one cluster spanning the udjat eye, money, timer and level */
+    nv = 0;
+    quadc(0, 0.10f, 0.16f, 0.915f, 0.06f);
+    quadc(0, 0.20f, 0.40f, 0.915f, 0.06f);
+    quadc(0, 0.50f, 0.70f, 0.915f, 0.06f);
+    quadc(0, 0.85f, 0.95f, 0.915f, 0.06f);
+    flush(0, 0);
+    CHECK(last_pins, "hud row pins");
+    /* the eye blinking open, alone in its own flush: alone it fails the corner test */
+    test_now_ms = 1016;
+    nv = 0;
+    quadc(0, 0.10f, 0.16f, 0.915f, 0.06f);
+    before = 0.915f;
+    flush(0, 0);
+    CHECK(!last_pins, "lone eye does not pin on its own");
+    CHECK(near(qcy(0), 1.0f + (before - 1.0f) * SY, 0.001f), "lone eye pinned to the top: %.4f want %.4f", qcy(0), 1.0f + (before - 1.0f) * SY);
+    SAY("lone eye -> %.4f (band alone would put it at %.4f)", qcy(0), before * SY);
+    /* the blink draws the eye larger, and an outline pulse grows well past the icon: both are centred on it */
+    test_now_ms = 1032;
+    nv = 0;
+    quadc(0, 0.09f, 0.17f, 0.915f, 0.10f);
+    flush(0, 0);
+    CHECK(near(qcy(0), 1.0f + (before - 1.0f) * SY, 0.001f), "enlarged eye pinned: %.4f", qcy(0));
+    nv = 0;
+    quadc(0, 0.00f, 0.26f, 0.915f, 0.40f);
+    flush(0, 0);
+    CHECK(near(qcy(0), 1.0f + (before - 1.0f) * SY, 0.001f), "eye pulse pinned: %.4f", qcy(0));
+    /* no hud drawn for longer than UI_2D_HUD_MS (a menu): the same piece shrinks to the centre */
+    test_now_ms = 1016 + UI_2D_HUD_MS + 100;
+    nv = 0;
+    quadc(0, 0.10f, 0.16f, 0.915f, 0.06f);
+    flush(0, 0);
+    CHECK(near(qcy(0), before * SY, 0.001f), "stale hud box ignored: %.4f want %.4f", qcy(0), before * SY);
+    g_ui_2d_band = 0;
+}
+
 int main(void) {
     /* the tests were written against the old initializers; the release build
-     * defaults centre on and the dump off, so pin them here. */
+     * defaults centre on, band on and the dump off, so pin them here. T13 turns
+     * band on for itself. */
     g_ui_2d_center = 0;
+    g_ui_2d_band = 0;
     g_do_ui_2d_dump = 1;
     static const struct { const char* name; fn f; int bars_differs; } T[] = {
         {"T1 rope tear", t1, 0}, {"T2 pinned-top column", t2, 0}, {"T3 hud", t3, 0}, {"T4 hud digits", t4, 0},
         {"T5 bbox vs mean", t5, 0}, {"T6 shape 79 straddle (bars=0 documents bug, bars=1 fixes)", 0, 1}, {"T7 regressions", t7, 0},
         {"T9 rope strip", t9, 0}, {"T10 strip guard", t10, 0}, {"T11 centre toggle", t11, 0},
         {"T12 keep rules + fog", t12, 0},
+        {"T13 band hud memory", t13, 0},
     };
     int i, total = 0;
     static uint8_t recA[sizeof rec];
