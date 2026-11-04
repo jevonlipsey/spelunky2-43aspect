@@ -36,6 +36,7 @@ No exe patching is needed (the dll applies the heap fix in memory too, so it als
 | `force_audio` | `1` | re-apply the `local.cfg` sfx / music volumes to the audio buses for the first minute (the game leaves them muted on Android) |
 | `custom_zoom` | `13.5` | camera zoom. 13.5 is vanilla. Do not raise it: at 15.0 or more the camera's vertical clamp has no valid range and the camera jitters on level entry |
 | `ui_2d_scale` | `1` | un-stretch the 2D UI (HUD icons, timer, menu text) for 4:3. `0` leaves it stretched |
+| `single_pad` | `1` | the game sees only one controller. DroidDeck can show Steam the built-in pad twice, which made one pad join as two players. Set `0` for local co-op with extra pads |
 | `debug_log` | `0` | write `mod_43aspect.log` next to the exe. Leave off for normal play; logging on the render thread can cause hitches |
 
 All other keys are tuning knobs and are documented in the comments of the ini.

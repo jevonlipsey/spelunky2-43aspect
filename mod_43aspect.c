@@ -19,7 +19,7 @@
 
 #define fabsf(x) __builtin_fabsf(x)
 
-#define MOD_VERSION    "mod_43aspect 4.2"
+#define MOD_VERSION    "mod_43aspect 4.3"
 #define DEFAULT_ASPECT  1.3333334f
 #define ORIGINAL_ASPECT 1.7777778f
 #define ORIGINAL_INV    0.5625f
@@ -654,6 +654,7 @@ static int       g_live_m00_count = 0;
 static int g_do_live_scan = 0;
 static int g_do_heap_patch = 1;
 static int g_do_force_audio = 1;
+static int g_do_single_pad = 1;
 
 /* the scan reads through ReadProcessMemory in chunks, which fails cleanly on a
  * region that went away, instead of dereferencing it. 60 bytes of overlap so a
@@ -1971,7 +1972,7 @@ static void write_default_ini(void) {
         "aspect_ratio = 1.3333334\n"
         "world_projection = 1\n"
         "no_letterbox = 1\n"
-        "cam_extents = 1\n"
+        "ui_screen_extents = 1\n"
         "\n"
         "; the ui canvas clamp at 0x22ce40db compares against this constant.\n"
         "; leaving it at 16:9 forces the 2d canvas into a 16:9 box -> menus get\n"
@@ -2057,6 +2058,9 @@ static void write_default_ini(void) {
         "; the game mutes the sfx / music buses on the device and never restores them.\n"
         "; 1 = push the local.cfg volumes back onto the buses for the first minute.\n"
         "force_audio = 1\n"
+        "; 1 = the game sees one controller. droiddeck can show steam the pad twice,\n"
+        "; so one pad joins as two players. 0 = local co-op with real extra pads.\n"
+        "single_pad = 1\n"
         "debug_log = 0\n";
 
     HANDLE h = CreateFileA(g_ini_path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
@@ -2100,7 +2104,7 @@ static char* trim(char* s) {
 
 static int ini_get(const char* section, const char* key,
                    char* out, int outsz, const char* def) {
-    static char buf[4096];
+    static char buf[32768];
     lstrcpynA(out, def, outsz);
     if (!read_whole_file(g_ini_path, buf, (int)sizeof(buf))) return 0;
 
@@ -2186,7 +2190,7 @@ static void read_ini(void) {
 
     g_do_world       = ini_get_int("aspect", "world_projection", 1) != 0;
     g_do_noletterbox = ini_get_int("aspect", "no_letterbox", 1) != 0;
-    g_do_camext      = ini_get_int("aspect", "cam_extents", 1) != 0;
+    g_do_camext      = ini_get_int("aspect", "ui_screen_extents", 1) != 0;
 
     g_do_hud_fix     = ini_get_int("aspect", "hud_fix", 0) != 0;
     ini_get("aspect", "hud_x_scale", buf, (int)sizeof(buf), "1.0");
@@ -2236,6 +2240,7 @@ static void read_ini(void) {
     g_do_live_scan = ini_get_int("aspect", "live_scan", 0) != 0;
     g_do_heap_patch = ini_get_int("aspect", "heap_patch", 1) != 0;
     g_do_force_audio = ini_get_int("aspect", "force_audio", 1) != 0;
+    g_do_single_pad = ini_get_int("aspect", "single_pad", 1) != 0;
 
     g_do_ui_2d_dump = ini_get_int("aspect", "ui_2d_dump", 0) != 0;
 
@@ -2347,6 +2352,111 @@ static int hooked_getbus(const void* self, const char* path, void** out) {
         }
     }
     return hr;
+}
+
+/* ### single_pad
+ * droiddeck can present the built-in pad to steam twice (as a deck pad and as
+ * an emulated wired steam controller), so steam makes two virtual xbox pads
+ * that carry the same input. most games read pad 1 and never notice; spelunky
+ * lets every pad join, so one pad plays two characters. the game polls pads
+ * through xinput and directinput, so both are filtered:
+ *   xinput: only the first connected user index reports connected.
+ *   dinput: enumeration passes the first game controller and skips the rest
+ *           (keyboards and mice always pass). spelunky finds its xinput pads
+ *           through dinput enumeration (the "Detected XInput controller ...
+ *           PIDVID" log line), so one must survive or no pad works at all. */
+#define XI_NOT_CONNECTED 1167u
+typedef DWORD (WINAPI *PFN_XInputGetState)(DWORD, void*);
+typedef DWORD (WINAPI *PFN_XInputSetState)(DWORD, void*);
+typedef HRESULT (WINAPI *PFN_DirectInput8Create)(HINSTANCE, DWORD, const void*, void**, void*);
+typedef BOOL (WINAPI *PFN_DIEnumCb)(const void*, void*);
+typedef HRESULT (WINAPI *PFN_EnumDevices)(void*, DWORD, PFN_DIEnumCb, void*, DWORD);
+
+static PFN_XInputGetState     g_real_xi_get  = NULL;
+static PFN_XInputSetState     g_real_xi_set  = NULL;
+static PFN_DirectInput8Create g_real_di8     = NULL;
+static PFN_EnumDevices        g_real_enumdev = NULL;
+static volatile LONG          g_xi_primary   = -1;
+static volatile LONG          g_xi_logged    = 0;
+static volatile LONG          g_di_logged    = 0;
+
+static DWORD WINAPI pad_xi_get(DWORD idx, void* state) {
+    DWORD r = g_real_xi_get(idx, state);
+    LONG p = g_xi_primary;
+    if (r != 0) {
+        if ((LONG)idx == p) InterlockedCompareExchange(&g_xi_primary, -1, p);
+        return r;
+    }
+    if (p < 0) {
+        InterlockedCompareExchange(&g_xi_primary, (LONG)idx, -1);
+        p = g_xi_primary;
+    }
+    if ((LONG)idx == p) return r;
+    if (InterlockedCompareExchange(&g_xi_logged, 1, 0) == 0) {
+        char b[96];
+        my_format(b, sizeof(b), "[pad] xinput: hiding pad %d (primary %d)", (int)idx, (int)p);
+        log_raw(b); boot_raw(b);
+    }
+    return XI_NOT_CONNECTED;
+}
+
+static DWORD WINAPI pad_xi_set(DWORD idx, void* vib) {
+    LONG p = g_xi_primary;
+    if (p >= 0 && (LONG)idx != p) return XI_NOT_CONNECTED;
+    return g_real_xi_set(idx, vib);
+}
+
+struct pad_enum_ctx { PFN_DIEnumCb cb; void* ref; int pads; int hidden; };
+
+static BOOL WINAPI pad_enum_cb(const void* inst, void* ref) {
+    struct pad_enum_ctx* c = (struct pad_enum_ctx*)ref;
+    /* DIDEVICEINSTANCE{A,W}: dwSize, guidInstance, guidProduct, dwDevType */
+    DWORD type = *(const DWORD*)((const uint8_t*)inst + 36) & 0xff;
+    if (type != 0x11 && type != 0x12 && type != 0x13 && c->pads++ > 0) {
+        c->hidden++;
+        return 1; /* DIENUM_CONTINUE */
+    }
+    return c->cb(inst, c->ref);
+}
+
+static HRESULT WINAPI pad_enumdevices(void* self, DWORD devtype, PFN_DIEnumCb cb, void* ref, DWORD flags) {
+    struct pad_enum_ctx c = { cb, ref, 0, 0 };
+    HRESULT hr = g_real_enumdev(self, devtype, pad_enum_cb, &c, flags);
+    if (c.hidden && InterlockedCompareExchange(&g_di_logged, 1, 0) == 0) {
+        char b[96];
+        my_format(b, sizeof(b), "[pad] dinput: kept 1 game controller, hid %d", c.hidden);
+        log_raw(b); boot_raw(b);
+    }
+    return hr;
+}
+
+static HRESULT WINAPI pad_di8create(HINSTANCE h, DWORD ver, const void* riid, void** out, void* outer) {
+    HRESULT hr = g_real_di8(h, ver, riid, out, outer);
+    if (hr < 0 || !out || !*out) return hr;
+    void** vtbl = *(void***)*out;
+    if (vtbl[4] == (void*)pad_enumdevices) return hr;
+    DWORD old = 0;
+    if (!VirtualProtect(&vtbl[4], sizeof(void*), PAGE_READWRITE, &old)) {
+        log_raw("[-] single_pad: dinput vtable protect failed");
+        return hr;
+    }
+    if (!g_real_enumdev) g_real_enumdev = (PFN_EnumDevices)vtbl[4];
+    vtbl[4] = (void*)pad_enumdevices;
+    DWORD ignored;
+    VirtualProtect(&vtbl[4], sizeof(void*), old, &ignored);
+    log_raw("[+] single_pad: dinput EnumDevices hooked");
+    return hr;
+}
+
+static void install_pad_hooks(void) {
+    HMODULE exe = GetModuleHandleA(NULL);
+    int a = patch_one_import(exe, "XInputGetState", 1, (void*)pad_xi_get, (void**)&g_real_xi_get);
+    int b = patch_one_import(exe, "XInputSetState", 1, (void*)pad_xi_set, (void**)&g_real_xi_set);
+    int c = patch_one_import(exe, "DirectInput8Create", 1, (void*)pad_di8create, (void**)&g_real_di8);
+    char buf[128];
+    my_format(buf, sizeof(buf), "[%s] single_pad: xinput get=%d set=%d dinput8=%d",
+              (a && b && c && g_real_xi_get && g_real_xi_set && g_real_di8) ? "+" : "-", a, b, c);
+    log_raw(buf); boot_raw(buf);
 }
 
 static void install_audio_hooks(void) {
@@ -2491,6 +2601,12 @@ static void apply_patches(void) {
         log_raw("[skip] force_audio off");
     }
 
+    if (g_do_single_pad) {
+        install_pad_hooks();
+    } else {
+        log_raw("[skip] single_pad off");
+    }
+
     /* independent of every aspect toggle: without it android never gets past boot */
     if (g_do_heap_patch) {
         patch_heap_limit();
@@ -2550,11 +2666,21 @@ static void apply_patches(void) {
         log_raw("[skip] no_letterbox off");
     }
 
-    /* 3. camera extents */
+    /* 3. ui screen extents - horizontal only.
+     *
+     * f840/f854/f870/f87c are half-extents used by the menu / screen layout
+     * code (0x22bdb280, 0x22bdea20, 0x22bf1ba0, 0x22c0a3a0; scaled by the
+     * easing helper 0x22bdd7b0). stock each is its Y partner x 16/9. this is
+     * NOT the world camera: on device it fixes CHOOSE ADVENTURER and changes
+     * nothing at level boundaries. the Y partners (f844, f874) are
+     * deliberately not touched. */
     if (g_do_camext) {
-        log_raw("[skip] cam_extents off (prevents camera rope jitter)");
+        patch_float(g_base + RVA_CAM_EXT_F840, 0.4740741f, 0.3555556f, (4.0f / 15.0f) * target_aspect, "cam_ext_f840_x");
+        patch_float(g_base + RVA_CAM_EXT_F854, 0.2962963f, 0.2222222f, (1.0f /  6.0f) * target_aspect, "cam_ext_f854_x");
+        patch_float(g_base + RVA_CAM_EXT_F870, 0.2370370f, 0.1777778f, (2.0f / 15.0f) * target_aspect, "cam_ext_f870_x");
+        patch_float(g_base + RVA_CAM_EXT_F87C, 0.2962963f, 0.2222222f, (1.0f /  6.0f) * target_aspect, "cam_ext_f87c_x");
     } else {
-        log_raw("[skip] cam_extents off");
+        log_raw("[skip] ui_screen_extents off");
     }
 
     /* 4. granular aspect controls */

@@ -9,3 +9,6 @@ Spel2.exe
 
 .DS_Store
 __pycache__/
+
+# device notes, never publish
+CLAUDE.local.md
